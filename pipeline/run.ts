@@ -141,6 +141,14 @@ async function main() {
   }
   await insertRows('runs', [{ generated_at: generatedAt, sources }]);
   await flush();
+  // Readable digest in the job log (sanity check of real data without downloading artifacts)
+  const today = time[nowIdx].slice(0, 10);
+  const digest = (summaries['intermediário'] ?? [])
+    .map((x) => ({ x, d: x.days.find((d) => d.date >= today && d.window) }))
+    .filter((r) => r.d)
+    .sort((a, b) => b.d!.score - a.d!.score)
+    .slice(0, 8);
+  for (const { x, d } of digest) console.log(`[digest] ${d!.date} ${x.id.padEnd(36)} ${d!.score.toFixed(1)} ${d!.window!.start.slice(11)}–${d!.window!.end.slice(11)} ${d!.conf} | ${d!.reason}`);
   const ok = sources.filter((s) => s.ok).map((s) => s.id);
   console.log(`[pipeline] ${spots.length} spots, ${time.length} h; sources ok: ${ok.join(', ')}`);
 }
