@@ -62,7 +62,11 @@ jobs:
           git config user.name "swell-sul-bot"
           git config user.email "swell-sul-bot@users.noreply.github.com"
           git add public/data/spots.json
-          git diff --cached --quiet || git commit -m "chore(data): rebuild spot database from OSM" && git push
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(data): rebuild spot database from OSM"
+            git pull --rebase -q origin "$GITHUB_REF_NAME"
+            git push
+          fi
 
       - name: Copernicus Marine (optional)
         if: env.COPERNICUSMARINE_SERVICE_USERNAME != ''
