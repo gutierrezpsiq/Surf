@@ -5,15 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc --noEmit",
     "spots": "tsx pipeline/build-spots.ts",
     "pipeline": "tsx pipeline/run.ts",
     "calibrate": "tsx pipeline/calibrate.ts",
     "notify": "tsx pipeline/notify.ts",
-    "demo-data": "tsx pipeline/demo-data.ts"
+    "mock-api": "tsx pipeline/tools/mock-open-meteo.ts",
+    "demo-data": "sh pipeline/tools/demo-data.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
@@ -37,6 +38,10 @@
     "vite": "^5.4.21",
     "vite-plugin-pwa": "^0.20.5",
     "vitest": "^2.1.9",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "workbox-expiration": "^7.4.1",
+    "workbox-precaching": "^7.4.1",
+    "workbox-routing": "^7.4.1",
+    "workbox-strategies": "^7.4.1"
   }
 }

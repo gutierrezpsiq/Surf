@@ -202,6 +202,7 @@ export function dailyBest(scores: HourScore[], day: boolean[]): DayBest[] {
       conf: top.conf,
       window: { start: sub[w.start].t, end: sub[w.end].t, score: w.score },
       red: winScores.every((s) => s.flags.some((f) => f.code !== 'frio')),
+      reason: top.reason,
     };
   });
 }

@@ -88,6 +88,8 @@ export interface DayBest {
   conf: Confidence;
   window?: { start: string; end: string; score: number };
   red: boolean;
+  /** One-line explanation at the day's best hour. */
+  reason?: string;
 }
 
 /** Per-spot summary (what Home / Week / Map need). */
@@ -114,6 +116,9 @@ export interface Summary {
   generatedAt: string; // ISO UTC
   start: string; // first local hour in series
   hours: number;
+  /** Index of the generation-time local hour in hourly arrays. */
+  nowIdx: number;
+  skill: string;
   demo?: boolean;
   sources: SourceStatus[];
   warnings: OfficialWarning[];
@@ -135,6 +140,7 @@ export interface OfficialWarning {
 export interface SpotDetail {
   id: string;
   generatedAt: string;
+  nowIdx: number;
   hours: HourPoint[];
   scores: HourScore[];
   sunrise: string[];

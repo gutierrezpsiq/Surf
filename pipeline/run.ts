@@ -4,13 +4,13 @@
  * A failing source is logged and skipped; the run continues with the rest.
  */
 import { readFileSync } from 'node:fs';
-import { assemble, isUsable, ModelVars, RawSpot } from '../src/core/assemble';
+import { assemble, ModelVars, RawSpot } from '../src/core/assemble';
 import type { Calibration } from '../src/core/calibration';
 import { buildCoastIndex, isSea } from '../src/core/coast';
 import { LonLat } from '../src/core/geo';
-import { tideStage } from '../src/core/physics';
-import { dailyBest, scoreHour } from '../src/core/scoring';
-import type { GridData, HourScore, OfficialWarning, SourceStatus, Spot, SpotDetail, SpotSummary, Summary } from '../src/core/types';
+import type { Skill } from '../src/core/scoring';
+import { nowIndex, PROFILES, scoreSeries, summarise, summaryFile } from '../src/core/spotScore';
+import type { GridData, OfficialWarning, SourceStatus, Spot, SpotDetail, SpotSummary, Summary } from '../src/core/types';
 import { fetchGridMarine, fetchGridWind, fetchMarine, fetchWind, OCEAN_MODEL, Point, PointSeries, WAVE_MODELS, WIND_MODELS } from './sources/openMeteo';
 import { feeds, fetchObservations } from './sources/observations';
 import { fetchStormglass, fetchWindy, loadCopernicus } from './sources/optional';
@@ -44,11 +44,6 @@ async function loadCalibration(): Promise<Calibration | undefined> {
   return readLocal<Calibration>('calibration.json');
 }
 
-function nowLocalHour(): string {
-  // America/Sao_Paulo has no DST since 2019 → fixed UTC−3
-  return new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 13) + ':00';
-}
-
 async function main() {
   const { spots } = JSON.parse(readFileSync(process.env.SPOTS_FILE ?? 'public/data/spots.json', 'utf8')) as { spots: Spot[] };
   const calib = await loadCalibration();
@@ -65,7 +60,7 @@ async function main() {
   if (!marine || !wind) throw new Error('Open-Meteo marine/forecast unavailable — keeping previous data');
   const warnings = [...(inmet ?? []), ...(marinha ?? [])];
   const time = marine[0].time;
-  const nowIdx = Math.max(0, time.indexOf(nowLocalHour()));
+  const nowIdx = nowIndex(time);
 
   // Optional keyed sources (top seed spots only, to respect quotas)
   const sgKey = process.env.STORMGLASS_API_KEY, windyKey = process.env.WINDY_API_KEY;
@@ -85,7 +80,7 @@ async function main() {
   const cop = await track('copernicus', 'Copernicus Marine (GLO wave/phy)', async () => loadCopernicus(), ['copernicus']);
 
   const generatedAt = new Date().toISOString();
-  const summaries: SpotSummary[] = [];
+  const summaries: Partial<Record<Skill, SpotSummary[]>> = {};
   spots.forEach((spot, si) => {
     const mr = marine[si], wr = wind[si];
     const wave: ModelVars = {};
@@ -100,32 +95,13 @@ async function main() {
     const raw: RawSpot = { time, wave, ocean: mr.models[OCEAN_MODEL], wind: wr.models };
     const hours = assemble(raw, spot.region, calib);
     if (c?.sea_surface_temperature) hours.forEach((h, i) => (h.sst ??= c.sea_surface_temperature[i] ?? undefined));
-    const tides = hours.map((h) => h.tide);
-    const scores: HourScore[] = hours.map((h, i) => {
-      if (!isUsable(h)) return { t: h.t, score: 0, conf: 'baixa', flags: [], windRel: 'lateral', energyKj: 0, reason: 'sem dados suficientes' };
-      if (!Number.isFinite(h.gust.v)) h.gust = { v: h.wind.v * 1.4, s: 0, n: 0 };
-      return scoreHour(h, { spot, leadHours: Math.max(0, i - nowIdx), tide: tideStage(tides, i), warnings });
-    });
-    const day = hours.map((h) => h.day);
-    // only today-from-now onward counts as "best" for today
-    const future = scores.map((s, i) => (i < nowIdx ? { ...s, score: 0 } : s));
-    const days = dailyBest(future, day);
-    const cur = scores[nowIdx];
-    summaries.push({
-      id: spot.id,
-      days,
-      hourly: scores.map((s, i) => (day[i] ? Math.round(s.score * 10) : -1)),
-      now: cur && { score: cur.score, conf: cur.conf, reason: cur.reason, flags: cur.flags },
-      sst: hours[nowIdx]?.sst,
-    });
-    const detail: SpotDetail = {
-      id: spot.id,
-      generatedAt,
-      hours,
-      scores,
-      sunrise: (wr.daily?.sunrise ?? Object.entries(wr.daily ?? {}).find(([k]) => k.startsWith('sunrise'))?.[1] ?? []) as string[],
-      sunset: (wr.daily?.sunset ?? Object.entries(wr.daily ?? {}).find(([k]) => k.startsWith('sunset'))?.[1] ?? []) as string[],
-    };
+    const scores = scoreSeries(spot, hours, nowIdx, PROFILES['intermediário'], warnings);
+    for (const skill of Object.keys(PROFILES) as Skill[]) {
+      const sc = skill === 'intermediário' ? scores : scoreSeries(spot, hours, nowIdx, PROFILES[skill], warnings);
+      (summaries[skill] ??= []).push(summarise(spot.id, hours, sc, nowIdx));
+    }
+    const daily = (k: string) => (wr.daily?.[k] ?? Object.entries(wr.daily ?? {}).find(([key]) => key.startsWith(k))?.[1] ?? []) as string[];
+    const detail: SpotDetail = { id: spot.id, generatedAt, nowIdx, hours, scores, sunrise: daily('sunrise'), sunset: daily('sunset') };
     writeOut(`spot/${spot.id}.json`, detail);
   });
 
@@ -159,8 +135,10 @@ async function main() {
     });
   }
 
-  const summary: Summary = { generatedAt, start: time[0], hours: time.length, sources, warnings, spots: summaries };
-  writeOut('summary.json', summary);
+  for (const skill of Object.keys(PROFILES) as Skill[]) {
+    const summary: Summary = { generatedAt, start: time[0], hours: time.length, nowIdx, skill, demo: process.env.DEMO === '1' || undefined, sources, warnings, spots: summaries[skill]! };
+    writeOut(summaryFile(skill), summary);
+  }
   await insertRows('runs', [{ generated_at: generatedAt, sources }]);
   await flush();
   const ok = sources.filter((s) => s.ok).map((s) => s.id);

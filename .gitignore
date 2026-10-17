@@ -8,3 +8,4 @@ out
 # generated forecast data (produced by the pipeline; spots.json is committed)
 public/data/*
 !public/data/spots.json
+*.tsbuildinfo

@@ -9,6 +9,8 @@ import { findAlerts } from '../src/core/alerts';
 import { fmtDrive, PORTO_ALEGRE } from '../src/core/drive';
 import type { Spot, Summary } from '../src/core/types';
 import { readLocal, supabase } from './store';
+import type { Skill } from '../src/core/scoring';
+import { PROFILES, summaryFile } from '../src/core/spotScore';
 
 async function main() {
   const s = supabase();
@@ -18,8 +20,12 @@ async function main() {
     return;
   }
   webpush.setVapidDetails(process.env.VAPID_SUBJECT ?? 'mailto:admin@example.com', pub, priv);
-  const summary = readLocal<Summary>('summary.json');
-  if (!summary) throw new Error('summary.json missing — run the pipeline first');
+  const summaries = new Map<Skill, Summary | undefined>();
+  const summaryFor = (skill: Skill) => {
+    if (!summaries.has(skill)) summaries.set(skill, readLocal<Summary>(summaryFile(skill)));
+    return summaries.get(skill);
+  };
+  if (!summaryFor('intermediário')) throw new Error('summary.json missing — run the pipeline first');
   const { spots } = JSON.parse(readFileSync('public/data/spots.json', 'utf8')) as { spots: Spot[] };
   const now = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 13) + ':00';
 
@@ -28,6 +34,7 @@ async function main() {
   let sent = 0;
   for (const sub of subs ?? []) {
     const p = sub.prefs ?? {};
+    const summary = summaryFor(PROFILES[p.skill as Skill] ? p.skill : 'intermediário') ?? summaryFor('intermediário')!;
     const alerts = findAlerts(summary, spots, { home: p.home ?? PORTO_ALEGRE, maxDriveMin: p.maxDriveMin ?? 180, minScore: p.minScore ?? 7 }, now)
       .filter((a) => !p.favoritesOnly || (p.favorites ?? []).includes(a.spotId));
     for (const a of alerts.slice(0, 3)) {
