@@ -185,6 +185,11 @@ export function mainWindow(bins: number[], thr = 0.35): { from: number; to: numb
     if (len > best.len) best = { start: s, len };
   }
   if (best.len === 0 && bins.every((b) => b >= thr)) best = { start: 0, len: n };
+  if (best.len === 0) {
+    // nothing above threshold (sheltered cove): report the single most exposed sector
+    const k = bins.indexOf(Math.max(...bins));
+    best = { start: k, len: 1 };
+  }
   return { from: best.start * 10 - 5 < 0 ? 355 : best.start * 10 - 5, to: norm360((best.start + best.len) * 10 - 5), width: best.len * 10 };
 }
 

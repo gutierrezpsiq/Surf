@@ -24,7 +24,7 @@ export const WAVE_VARS = [
   'secondary_swell_wave_height', 'secondary_swell_wave_period', 'secondary_swell_wave_direction',
   'wind_wave_height',
 ];
-export const OCEAN_VARS = ['sea_surface_temperature', 'sea_level_height_msl', 'ocean_current_velocity', 'ocean_current_direction'];
+export const OCEAN_VARS = ['sea_surface_temperature', 'sea_level_height_msl'];
 export const WIND_VARS = ['wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m', 'precipitation', 'cape', 'cloud_cover', 'temperature_2m', 'uv_index', 'is_day'];
 
 export interface Point { lat: number; lon: number }
@@ -59,6 +59,28 @@ function chunk<T>(xs: T[], n: number): T[][] {
   return out;
 }
 
+/**
+ * Free tier: 600 calls/min, 5 000/h, 10 000/day, where one location with > 10 variables (per model)
+ * counts as several calls. Keep a rolling one-minute budget well under the limit.
+ */
+const MINUTE_BUDGET = Number(process.env.OPEN_METEO_MINUTE_BUDGET ?? 450);
+const spent: { t: number; w: number }[] = [];
+export function callWeight(locations: number, variables: number, models: number): number {
+  return locations * Math.max(1, (variables * Math.max(1, models)) / 10);
+}
+async function throttle(weight: number) {
+  for (;;) {
+    const now = Date.now();
+    while (spent.length && now - spent[0].t > 60_000) spent.shift();
+    const used = spent.reduce((a, b) => a + b.w, 0);
+    if (used + weight <= MINUTE_BUDGET || !spent.length) break;
+    await new Promise((r) => setTimeout(r, 60_000 - (now - spent[0].t) + 250));
+  }
+  spent.push({ t: Date.now(), w: weight });
+}
+let totalWeight = 0;
+export const openMeteoUsage = () => Math.round(totalWeight);
+
 async function multi(base: string, points: Point[], params: Record<string, string>, models: string[], vars: string[], batch = 40): Promise<PointSeries[]> {
   const out: PointSeries[] = [];
   for (const group of chunk(points, batch)) {
@@ -71,7 +93,11 @@ async function multi(base: string, points: Point[], params: Record<string, strin
       ...(API_KEY ? { apikey: API_KEY } : {}),
     });
     if (models.length) q.set('models', models.join(','));
-    const js = await fetchJson<any>(`${base}?${q}`, { timeoutMs: 90_000 });
+    const hourlyVars = (params.hourly ?? '').split(',').length;
+    const w = callWeight(group.length, hourlyVars, models.length);
+    await throttle(w);
+    totalWeight += w;
+    const js = await fetchJson<any>(`${base}?${q}`, { timeoutMs: 90_000, retries: 3 });
     const arr = Array.isArray(js) ? js : [js];
     for (const r of arr) {
       out.push({ time: r.hourly?.time ?? [], models: splitModels(r.hourly ?? {}, models, vars), daily: r.daily });

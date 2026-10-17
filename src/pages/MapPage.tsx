@@ -210,7 +210,7 @@ function MapView({ rows, grid, ti, hourIdx, field, wind, arrows, onPick }: { row
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const nx = grid.lons.length;
-    const half = 0.25;
+    const half = Math.abs(grid.lats[1] - grid.lats[0]) / 2;
     if (field !== 'none') {
       const f = grid.fields[field], spec = FIELD[field];
       const row = f.data[ti];

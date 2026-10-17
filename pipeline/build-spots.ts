@@ -17,7 +17,11 @@ import { SEEDS } from './seeds';
 
 const BBOX = { s: -33.76, w: -54.0, n: -25.32, e: -47.8 }; // PR/SC/RS coast (Chuí → PR/SP border)
 const OVERPASS = process.env.OVERPASS_URL ?? 'https://overpass-api.de/api/interpreter';
-const VIRTUAL_SPACING_KM = 8;
+const VIRTUAL_SPACING_KM = 12;
+/** Seed coordinates are approximate: search this far for the most exposed stretch of coast. */
+const SEED_SEARCH_KM = 0.7;
+/** Structures/rocks closer than this shape the break and its hazards. */
+const FEATURE_KM = 0.4;
 
 interface OsmFeature { kind: 'surf' | 'breakwater' | 'groyne' | 'pier' | 'reef' | 'rock' | 'cliff'; name?: string; pts: LonLat[] }
 
@@ -97,8 +101,20 @@ function slug(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+function lengthKm(pts: LonLat[]) {
+  let L = 0;
+  for (let i = 1; i < pts.length; i++) L += haversineKm(pts[i - 1], pts[i]);
+  return L;
+}
+
 function nearbyFeatures(features: OsmFeature[], p: LonLat, km: number) {
-  return features.filter((f) => f.kind !== 'surf' && f.pts.some((q) => haversineKm(p, q) <= km));
+  return features.filter(
+    (f) =>
+      f.kind !== 'surf' &&
+      // small decks/trapiches are tagged pier too; only long fishing platforms matter for surf
+      (f.kind !== 'pier' || lengthKm(f.pts) >= 0.15) &&
+      f.pts.some((q) => haversineKm(p, q) <= km),
+  );
 }
 
 function inferBreak(name: string, near: OsmFeature[], nearBlocked: number): { type: BreakType; source: string; hazards: string[] } {
@@ -106,12 +122,12 @@ function inferBreak(name: string, near: OsmFeature[], nearBlocked: number): { ty
   const kinds = new Set(near.map((f) => f.kind));
   let type: BreakType = 'beach';
   let source = 'padrão: praia de areia (fundo presumido)';
-  if (kinds.has('reef')) { type = 'reef'; source = 'OSM natural=reef ≤ 1 km'; hazards.push('Fundo de laje/recife'); }
+  if (kinds.has('reef')) { type = 'reef'; source = 'OSM natural=reef ≤ 400 m'; hazards.push('Fundo de laje/recife'); }
   else if (kinds.has('breakwater') || kinds.has('groyne') || /molhe/i.test(name)) {
-    type = 'jetty'; source = kinds.size ? 'OSM man_made=breakwater/groyne ≤ 1 km' : 'nome contém "molhe"';
+    type = 'jetty'; source = kinds.size ? 'OSM man_made=breakwater/groyne ≤ 400 m' : 'nome contém "molhe"';
     hazards.push('Molhes/pedras na arrebentação');
   } else if (kinds.has('pier') || /plataforma/i.test(name)) {
-    type = 'pier'; source = kinds.has('pier') ? 'OSM man_made=pier ≤ 1 km' : 'nome contém "plataforma"';
+    type = 'pier'; source = kinds.has('pier') ? 'OSM man_made=pier ≥ 150 m, ≤ 400 m' : 'nome contém "plataforma"';
     hazards.push('Pilares da plataforma de pesca');
   } else if (nearBlocked < 0.4) {
     type = 'point'; source = 'geometria: ponta/costão (terra em < 40 % das direções a 3 km)';
@@ -128,9 +144,27 @@ function analyse(idx: CoastIndex, features: OsmFeature[], coastSource: Spot['inf
   const o = orientation(idx, snap);
   const ex = exposure(idx, o.sea, o.facing);
   const win = mainWindow(ex.bins);
-  const near = nearbyFeatures(features, snap.point, 1);
+  const near = nearbyFeatures(features, snap.point, FEATURE_KM);
   const br = inferBreak(name, near, ex.nearBlocked);
   return { snap, facing: Math.round(o.facing), sea: o.sea, ex, win, br, coastSource };
+}
+
+/**
+ * Named spots are by definition exposed: among coastline vertices within SEED_SEARCH_KM of the
+ * approximate coordinate, pick the one with the most open-ocean exposure (lightly penalising distance).
+ * Prevents a 500 m coordinate error from snapping onto the sheltered side of a headland.
+ */
+function bestNearby(idx: CoastIndex, features: OsmFeature[], coastSource: Spot['inferred']['coastSource'], p: LonLat, name: string) {
+  const cands: LonLat[] = [p];
+  for (const line of idx.lines) for (const q of line) if (haversineKm(p, q) <= SEED_SEARCH_KM) cands.push(q);
+  let best = analyse(idx, features, coastSource, p, name);
+  let bestScore = -Infinity;
+  for (const c of cands) {
+    const a = c === p ? best : analyse(idx, features, coastSource, c, name);
+    const score = a.ex.bins.reduce((x, y) => x + y, 0) - 3 * haversineKm(p, a.snap.point);
+    if (score > bestScore) { bestScore = score; best = a; }
+  }
+  return best;
 }
 
 async function main() {
@@ -166,11 +200,13 @@ async function main() {
     };
   };
 
-  for (const s of SEEDS) spots.push(make(s.name, [s.lon, s.lat], 'seed'));
+  for (const s of SEEDS) spots.push(make(s.name, [s.lon, s.lat], 'seed', bestNearby(idx, features, coastSource, [s.lon, s.lat], s.name)));
+  const norm = (x: string) => slug(x).replace(/^praia-d[aoe]s?-/, '');
   for (const f of features.filter((f) => f.kind === 'surf' && f.name)) {
     const p = f.pts[f.pts.length - 1];
-    if (spots.some((s) => haversineKm([s.lon, s.lat], p) < 1.5)) continue;
-    spots.push(make(f.name!, p, 'osm'));
+    if (/piscina|escola|school|loja|shop|aluguel|rental/i.test(f.name!)) continue; // businesses, wave pools
+    if (spots.some((s) => haversineKm([s.lon, s.lat], p) < 1.5 || (haversineKm([s.lon, s.lat], p) < 6 && slug(s.name).includes(norm(f.name!))))) continue;
+    spots.push(make(f.name!, p, 'osm', bestNearby(idx, features, coastSource, p, f.name!)));
   }
 
   // Virtual points: walk each coastline, every ~8 km, keep open-ocean ones away from named spots.

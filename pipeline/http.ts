@@ -9,12 +9,16 @@ export async function fetchJson<T = any>(url: string, init: RequestInit & { time
       const res = await fetch(url, { ...rest, signal: ctl.signal });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status} ${body.slice(0, 200)}`);
+        const err = new Error(`HTTP ${res.status} ${body.slice(0, 200)}`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
       }
       return (await res.json()) as T;
     } catch (e) {
       lastErr = e;
-      if (attempt < retries) await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
+      // rate limited (per-minute quota): wait for the window to reset instead of hammering
+      const wait = (e as { status?: number }).status === 429 ? 65_000 : 1500 * 2 ** attempt;
+      if (attempt < retries) await new Promise((r) => setTimeout(r, wait));
     } finally {
       clearTimeout(timer);
     }

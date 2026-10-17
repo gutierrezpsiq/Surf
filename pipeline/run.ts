@@ -11,7 +11,7 @@ import { LonLat } from '../src/core/geo';
 import type { Skill } from '../src/core/scoring';
 import { nowIndex, PROFILES, scoreSeries, summarise, summaryFile } from '../src/core/spotScore';
 import type { GridData, OfficialWarning, SourceStatus, Spot, SpotDetail, SpotSummary, Summary } from '../src/core/types';
-import { fetchGridMarine, fetchGridWind, fetchMarine, fetchWind, OCEAN_MODEL, Point, PointSeries, WAVE_MODELS, WIND_MODELS } from './sources/openMeteo';
+import { fetchGridMarine, fetchGridWind, fetchMarine, fetchWind, OCEAN_MODEL, openMeteoUsage, Point, PointSeries, WAVE_MODELS, WIND_MODELS } from './sources/openMeteo';
 import { feeds, fetchObservations } from './sources/observations';
 import { fetchStormglass, fetchWindy, loadCopernicus } from './sources/optional';
 import { fetchInmet, fetchMarinha } from './sources/warnings';
@@ -50,9 +50,14 @@ async function main() {
   const obsFeeds = feeds();
   const pts: Point[] = [...spots.map((s) => ({ lat: s.lat, lon: s.lon })), ...obsFeeds.map((f) => ({ lat: f.lat, lon: f.lon }))];
 
-  const [marine, wind, ww3, inmet, marinha] = await Promise.all([
-    track('open-meteo-marine', 'Open-Meteo Marine (ECMWF WAM, MF-WAM, DWD GWAM, NOAA GFS-Wave, MF correntes/maré/TSM)', () => fetchMarine(pts), [...WAVE_MODELS, OCEAN_MODEL]),
-    track('open-meteo-forecast', 'Open-Meteo Forecast (ECMWF IFS, GFS, ICON, ARPEGE, UKMO)', () => fetchWind(pts), WIND_MODELS),
+  // Open-Meteo calls run one after another (shared per-minute quota); the other sources in parallel
+  const openMeteo = (async () => {
+    const m = await track('open-meteo-marine', 'Open-Meteo Marine (ECMWF WAM, MF-WAM, DWD GWAM, NOAA GFS-Wave, MF maré/TSM)', () => fetchMarine(pts), [...WAVE_MODELS, OCEAN_MODEL]);
+    const w = await track('open-meteo-forecast', 'Open-Meteo Forecast (ECMWF IFS, GFS, ICON, ARPEGE, UKMO)', () => fetchWind(pts), WIND_MODELS);
+    return [m, w] as const;
+  })();
+  const [[marine, wind], ww3, inmet, marinha] = await Promise.all([
+    openMeteo,
     track<Ww3Grid>('noaa-ww3', 'NOAA WaveWatch III (ERDDAP PacIOOS)', () => fetchWw3(), ['ww3']),
     track<OfficialWarning[]>('inmet', 'INMET avisos', () => fetchInmet()),
     track<OfficialWarning[]>('marinha', 'Marinha avisos de mau tempo', () => fetchMarinha()),
@@ -150,7 +155,7 @@ async function main() {
     .slice(0, 8);
   for (const { x, d } of digest) console.log(`[digest] ${d!.date} ${x.id.padEnd(36)} ${d!.score.toFixed(1)} ${d!.window!.start.slice(11)}–${d!.window!.end.slice(11)} ${d!.conf} | ${d!.reason}`);
   const ok = sources.filter((s) => s.ok).map((s) => s.id);
-  console.log(`[pipeline] ${spots.length} spots, ${time.length} h; sources ok: ${ok.join(', ')}`);
+  console.log(`[pipeline] ${spots.length} spots, ${time.length} h; sources ok: ${ok.join(', ')}; Open-Meteo weighted calls ≈ ${openMeteoUsage()}`);
 }
 
 function alignTo(c: { time: string[] } & Record<string, any>, time: string[]) {
@@ -166,11 +171,14 @@ function alignTo(c: { time: string[] } & Record<string, any>, time: string[]) {
   return out;
 }
 
+/** Map grid spacing (°): 0.75° keeps the free Open-Meteo quota comfortable at 4 runs/day. */
+const GRID_STEP = 0.75;
+
 async function buildGrid(time: string[]): Promise<GridData> {
   const coast = buildCoastIndex(JSON.parse(readFileSync('data/coastline.json', 'utf8')).lines as LonLat[][]);
   const lats: number[] = [], lons: number[] = [];
-  for (let la = -34.5; la <= -24.5 + 1e-9; la += 0.5) lats.push(+la.toFixed(2));
-  for (let lo = -54.5; lo <= -44.5 + 1e-9; lo += 0.5) lons.push(+lo.toFixed(2));
+  for (let la = -34.5; la <= -24.5 + 1e-9; la += GRID_STEP) lats.push(+la.toFixed(2));
+  for (let lo = -54.5; lo <= -44.5 + 1e-9; lo += GRID_STEP) lons.push(+lo.toFixed(2));
   const cells = lats.flatMap((la) => lons.map((lo) => ({ lat: la, lon: lo })));
   const seaMask = cells.map((c) => isSea(coast, [c.lon, c.lat]));
   const seaCells = cells.filter((_, i) => seaMask[i]);
