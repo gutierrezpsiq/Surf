@@ -10,6 +10,10 @@ on:
         description: 'Rebuild spots from OpenStreetMap'
         type: boolean
         default: false
+      deploy_only:
+        description: 'Only rebuild and publish the app with the last good forecast (no API calls)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -70,17 +74,23 @@ jobs:
           fi
 
       - name: Copernicus Marine (optional)
-        if: env.COPERNICUSMARINE_SERVICE_USERNAME != ''
+        if: env.COPERNICUSMARINE_SERVICE_USERNAME != '' && !inputs.deploy_only
         continue-on-error: true
         run: |
           pip install --quiet copernicusmarine xarray numpy
           python pipeline/copernicus.py
 
-      - run: npm run pipeline
+      # A failed forecast keeps the last good data (restored above); the app is still published.
+      - name: Forecast pipeline
+        id: forecast
+        if: ${{ !inputs.deploy_only }}
+        run: npm run pipeline
+        continue-on-error: true
       - run: npm run calibrate
-        if: github.event.schedule == '40 1,7,13,19 * * *' && env.SUPABASE_URL != ''
+        if: steps.forecast.outcome == 'success' && env.SUPABASE_URL != ''
         continue-on-error: true
       - run: npm run notify
+        if: steps.forecast.outcome == 'success'
         continue-on-error: true
 
       - uses: actions/cache/save@v4
@@ -88,6 +98,9 @@ jobs:
         with:
           path: public/data
           key: forecast-data-${{ github.run_id }}
+
+      - name: Check there is forecast data to publish
+        run: test -f public/data/summary.json || (echo "::error::no forecast data (first run failed?)" && exit 1)
 
       - name: Build app
         run: npm run build
@@ -100,3 +113,7 @@ jobs:
         with: { path: dist }
       - uses: actions/deploy-pages@v4
         id: deploy
+
+      - name: Report a failed forecast after publishing
+        if: steps.forecast.outcome == 'failure'
+        run: echo "::error::forecast pipeline failed — published the app with the previous forecast" && exit 1
