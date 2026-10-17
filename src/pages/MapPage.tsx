@@ -5,7 +5,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { fmtDrive } from '../core/drive';
 import type { GridData } from '../core/types';
 import { ConfBadge, ErrorBox, Loading } from '../components/ui';
-import { fieldColor, inkOn, isDark, ORANGE, scoreColor } from '../lib/colors';
+import { fieldColor, fieldRamp, inkOn, isDark, scoreColor } from '../lib/colors';
 import { loadCities, loadGrid, loadLand, Row, useAsync, useForecast } from '../lib/data';
 import { dayShort, hh, num } from '../lib/format';
 
@@ -17,6 +17,31 @@ const FIELD: Record<Exclude<Field, 'none'>, { label: string; unit: string; min: 
   rain: { label: 'Chuva', unit: 'mm/h', min: 0, max: 8 },
 };
 const NA = -9999;
+
+/**
+ * Coastal cells of the coarse grid are land (no sea value). For display, copy each missing cell
+ * from its nearest valid neighbour (up to `passes` cells away) so colours and swell arrows reach
+ * the beach; the land mask clips anything drawn over land.
+ */
+function fillCoast(row: number[], ny: number, nx: number, passes = 2): number[] {
+  let cur = row;
+  for (let k = 0; k < passes; k++) {
+    const next = cur.slice();
+    for (let i = 0; i < ny; i++) {
+      for (let j = 0; j < nx; j++) {
+        if (cur[i * nx + j] !== NA) continue;
+        for (const [di, dj] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+          const a = i + di, b = j + dj;
+          if (a < 0 || b < 0 || a >= ny || b >= nx) continue;
+          const v = cur[a * nx + b];
+          if (v !== NA) { next[i * nx + j] = v; break; }
+        }
+      }
+    }
+    cur = next;
+  }
+  return cur;
+}
 
 export default function MapPage() {
   const { rows, summary, error, loading } = useForecast();
@@ -72,11 +97,27 @@ export default function MapPage() {
         <button className="chip bg-surface shadow-sm" aria-pressed={arrows} onClick={() => setArrows(!arrows)}>Direção</button>
       </div>
 
-      {field !== 'none' && (
-        <div className="absolute right-2 top-24 z-10 card px-2 py-1.5 text-[10px] text-ink2">
-          <div className="font-semibold mb-1">{FIELD[field].label} ({FIELD[field].unit})</div>
-          <div className="w-28 h-2 rounded-sm" style={{ background: `linear-gradient(90deg, ${ORANGE.join(',')})` }} />
-          <div className="flex justify-between"><span>{FIELD[field].min}</span><span>{FIELD[field].max}+</span></div>
+      {(field !== 'none' || arrows || wind) && (
+        <div className="absolute right-2 top-24 z-10 card px-2.5 py-2 text-[10px] text-ink2 space-y-1.5 shadow-sm">
+          {field !== 'none' && (
+            <div>
+              <div className="font-semibold mb-1">{FIELD[field].label} ({FIELD[field].unit})</div>
+              <div className="w-28 h-2 rounded-sm" style={{ background: `linear-gradient(90deg, ${fieldRamp().join(',')})` }} />
+              <div className="flex justify-between"><span>{FIELD[field].min}</span><span>{FIELD[field].max}+</span></div>
+            </div>
+          )}
+          {arrows && (
+            <div className="flex items-center gap-1.5">
+              <svg width="18" height="14" viewBox="-10 -7 20 14" aria-hidden><path d="M9 0 L-9 6 L-3 0 L-9 -6 Z" fill="#0b2f4a" stroke="#fff" strokeWidth="2" strokeLinejoin="round" /></svg>
+              swell (para onde vai)
+            </div>
+          )}
+          {wind && (
+            <div className="flex items-center gap-1.5">
+              <svg width="18" height="14" viewBox="0 0 18 14" aria-hidden><path d="M1 9 Q 6 4 17 5" fill="none" stroke="rgba(15,30,40,.5)" strokeWidth="3.4" strokeLinecap="round" /><path d="M1 9 Q 6 4 17 5" fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" /></svg>
+              vento (riscos em movimento)
+            </div>
+          )}
         </div>
       )}
 
@@ -268,51 +309,79 @@ function MapView({ rows, grid, ti, hourIdx, field, wind, arrows, onPick }: { row
     const half = Math.abs(grid.lats[1] - grid.lats[0]) / 2;
     if (field !== 'none') {
       const f = grid.fields[field], spec = FIELD[field];
-      const row = f.data[ti];
+      const row = field === 'rain' ? f.data[ti] : fillCoast(f.data[ti], grid.lats.length, nx);
       grid.lats.forEach((la, i) => grid.lons.forEach((lo, j) => {
         const raw = row[i * nx + j];
         if (raw === NA) return;
         const val = raw / f.scale;
         if (field === 'rain' && val < 0.1) return;
         const a = m.project([lo - half, la + half]), b = m.project([lo + half, la - half]);
-        const [r, gg, bb] = fieldColor((val - spec.min) / (spec.max - spec.min));
+        const [r, gg, bb] = fieldColor((val - spec.min) / (spec.max - spec.min), dark);
         ctx.fillStyle = `rgba(${r},${gg},${bb},0.62)`;
         ctx.fillRect(a.x, a.y, b.x - a.x + 0.5, b.y - a.y + 0.5);
       }));
       // marine fields stop at the coastline
       if (land && field !== 'rain') {
         ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = '#000'; // opaque: erase fully (the last cell colour is semi-transparent)
         ctx.beginPath();
         for (const poly of land) for (const ring of poly) ring.forEach(([lo, la], k) => {
           const p = m.project([lo, la]);
           if (k === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
         });
-        ctx.fill('evenodd');
+        ctx.fill('nonzero');
         ctx.globalCompositeOperation = 'source-over';
       }
     }
     if (arrows) {
-      const d = grid.fields.dir, hs = grid.fields.hs;
-      ctx.strokeStyle = dark ? '#f0efec' : '#0b0b0b';
-      ctx.lineWidth = 1.4;
-      grid.lats.forEach((la, i) => grid.lons.forEach((lo, j) => {
-        const raw = d.data[ti][i * nx + j];
-        if (raw === NA) return;
+      // Swell direction on an even screen grid (fixed size at every zoom), sampled from the
+      // nearest sea cell; never over land. Solid navy arrowhead + white outline: readable on
+      // both themes and clearly different from the moving white wind streaks.
+      const dirRow = fillCoast(grid.fields.dir.data[ti], grid.lats.length, nx, 3);
+      const landPath = new Path2D();
+      if (land) for (const poly of land) for (const ring of poly) ring.forEach(([lo, la], k) => {
         const p = m.project([lo, la]);
-        const len = 6 + Math.min(10, (hs.data[ti][i * nx + j] / hs.scale) * 4);
-        const go = ((raw + 180) * Math.PI) / 180; // direction of travel
-        const dx = Math.sin(go) * len, dy = -Math.cos(go) * len;
-        ctx.beginPath();
-        ctx.moveTo(p.x - dx / 2, p.y - dy / 2);
-        ctx.lineTo(p.x + dx / 2, p.y + dy / 2);
-        const ang = Math.atan2(dy, dx);
-        ctx.lineTo(p.x + dx / 2 - 4 * Math.cos(ang - 0.5), p.y + dy / 2 - 4 * Math.sin(ang - 0.5));
-        ctx.moveTo(p.x + dx / 2, p.y + dy / 2);
-        ctx.lineTo(p.x + dx / 2 - 4 * Math.cos(ang + 0.5), p.y + dy / 2 - 4 * Math.sin(ang + 0.5));
-        ctx.stroke();
-      }));
+        if (k === 0) landPath.moveTo(p.x, p.y); else landPath.lineTo(p.x, p.y);
+      });
+      const lat0 = grid.lats[0], lon0 = grid.lons[0];
+      const dLat = grid.lats[1] - lat0, dLon = grid.lons[1] - lon0;
+      const STEP = 56;
+      ctx.lineJoin = 'round';
+      // keep clear of visible spot markers and their names
+      const named = m.getZoom() >= 9;
+      const keepOut = rows
+        .filter((r) => markers.current.get(r.spot.id)?.el.style.display !== 'none')
+        .map((r) => m.project([r.spot.lon, r.spot.lat]));
+      const blocked = (x: number, y: number) =>
+        keepOut.some((q) => (Math.abs(x - q.x) < 24 && Math.abs(y - q.y) < 20) || (named && x > q.x && x < q.x + 150 && Math.abs(y - q.y) < 16));
+      for (let y = STEP / 2; y < h; y += STEP) {
+        for (let x = STEP / 2; x < w; x += STEP) {
+          if (land && ctx.isPointInPath(landPath, x * dpr, y * dpr, 'nonzero')) continue;
+          if (blocked(x, y)) continue;
+          const ll = m.unproject([x, y]);
+          const i = Math.round((ll.lat - lat0) / dLat), j = Math.round((ll.lng - lon0) / dLon);
+          if (i < 0 || j < 0 || i >= grid.lats.length || j >= nx) continue;
+          const raw = dirRow[i * nx + j];
+          if (raw === NA) continue;
+          const go = ((raw + 180) * Math.PI) / 180; // direction of travel (screen: x right, y down)
+          const ux = Math.sin(go), uy = -Math.cos(go);
+          const px = -uy, py = ux;
+          const L = 9, W = 6;
+          ctx.beginPath();
+          ctx.moveTo(x + ux * L, y + uy * L); // tip
+          ctx.lineTo(x - ux * L + px * W, y - uy * L + py * W);
+          ctx.lineTo(x - ux * (L * 0.35), y - uy * (L * 0.35)); // notch
+          ctx.lineTo(x - ux * L - px * W, y - uy * L - py * W);
+          ctx.closePath();
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = '#ffffff';
+          ctx.stroke();
+          ctx.fillStyle = '#0b2f4a';
+          ctx.fill();
+        }
+      }
     }
-  }, [grid, ti, field, arrows, ready, dark, land]);
+  }, [grid, ti, field, arrows, ready, dark, land, rows, zoom]);
 
   // animated wind particles (leaflet-velocity style)
   useEffect(() => {
@@ -346,13 +415,13 @@ function MapView({ rows, grid, ti, hourIdx, field, wind, arrows, onPick }: { row
     const parts = Array.from({ length: N }, rnd);
     const k = 0.0009 / Math.pow(2, m.getZoom() - 5.6); // degrees per (km/h) per frame
     let raf = 0;
-    const ink = dark ? '240,239,236' : '30,30,30';
+    // wind = white streaks with a thin dark edge (visible on light land and dark sea alike)
+    const ink = '255,255,255';
     const frame = () => {
       ctx.globalCompositeOperation = 'destination-in';
       ctx.fillStyle = 'rgba(0,0,0,0.92)';
       ctx.fillRect(0, 0, w, h);
       ctx.globalCompositeOperation = 'source-over';
-      ctx.lineWidth = 1.1;
       for (const p of parts) {
         const uv = sample(p[0], p[1]);
         if (!uv || p[2]++ > 90) { Object.assign(p, rnd()); continue; }
@@ -361,8 +430,14 @@ function MapView({ rows, grid, ti, hourIdx, field, wind, arrows, onPick }: { row
         p[1] += uv[1] * k;
         const b = m.project([p[0], p[1]]);
         const sp = Math.hypot(uv[0], uv[1]);
-        ctx.strokeStyle = `rgba(${ink},${Math.min(0.9, 0.25 + sp / 50)})`;
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        const alpha = Math.min(0.95, 0.35 + sp / 45);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+        ctx.lineWidth = 2.6;
+        ctx.strokeStyle = `rgba(15,30,40,${alpha * 0.45})`;
+        ctx.stroke();
+        ctx.lineWidth = 1.3;
+        ctx.strokeStyle = `rgba(${ink},${alpha})`;
+        ctx.stroke();
       }
       raf = requestAnimationFrame(frame);
     };

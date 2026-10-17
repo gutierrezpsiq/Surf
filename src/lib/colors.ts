@@ -54,12 +54,18 @@ export const SERIES_LIGHT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba
 export const SERIES_DARK = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
 export const series = (i: number, dark = isDark()) => (dark ? SERIES_DARK : SERIES_LIGHT)[i % 8];
 
-/** Second sequential context (map fields) uses an orange single-hue ramp. */
-export const ORANGE = ['#fde7dc', '#fbcdb6', '#f8b190', '#f2936a', '#eb6834', '#cf5124', '#a93f1b', '#823015', '#5c210e'];
-export function fieldColor(t: number): [number, number, number] {
-  const x = Math.max(0, Math.min(1, t)) * (ORANGE.length - 1);
+/**
+ * Map fields (wave height, period, water temperature, rain): blue-cyan sequential ramp, validated
+ * with the dataviz validator for both surfaces. Light: pale → deep; dark: deep → bright.
+ */
+export const FIELD_LIGHT = ['#9fdcec', '#62c3dc', '#2aa5c6', '#1683a6', '#0d6283', '#07425c'];
+export const FIELD_DARK = ['#135d7d', '#17789c', '#1f93b8', '#3fb0d3', '#7fcfe6', '#c1ebf6'];
+export const fieldRamp = (dark = isDark()) => (dark ? FIELD_DARK : FIELD_LIGHT);
+export function fieldColor(t: number, dark = isDark()): [number, number, number] {
+  const ramp = fieldRamp(dark);
+  const x = Math.max(0, Math.min(1, t)) * (ramp.length - 1);
   const i = Math.floor(x), f = x - i;
-  const a = hex(ORANGE[i]), b = hex(ORANGE[Math.min(i + 1, ORANGE.length - 1)]);
+  const a = hex(ramp[i]), b = hex(ramp[Math.min(i + 1, ramp.length - 1)]);
   return [0, 1, 2].map((k) => Math.round(a[k] + (b[k] - a[k]) * f)) as [number, number, number];
 }
 function hex(h: string) {
