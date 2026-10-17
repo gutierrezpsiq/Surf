@@ -81,7 +81,7 @@ async function throttle(weight: number) {
 let totalWeight = 0;
 export const openMeteoUsage = () => Math.round(totalWeight);
 
-async function multi(base: string, points: Point[], params: Record<string, string>, models: string[], vars: string[], batch = 40): Promise<PointSeries[]> {
+async function multi(base: string, points: Point[], params: Record<string, string>, models: string[], vars: string[], batch = 15): Promise<PointSeries[]> {
   const out: PointSeries[] = [];
   for (const group of chunk(points, batch)) {
     const q = new URLSearchParams({

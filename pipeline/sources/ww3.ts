@@ -7,7 +7,10 @@
 import { fetchJson } from '../http';
 import type { Point } from './openMeteo';
 
-const BASE = process.env.WW3_ERDDAP_URL ?? 'https://pae-paha.pacioos.hawaii.edu/erddap/griddap/ww3_global.json';
+/** Same dataset (ww3_global) on PacIOOS and on NOAA's UAF ERDDAP; tried in order. */
+const SERVERS = process.env.WW3_ERDDAP_URL
+  ? [process.env.WW3_ERDDAP_URL]
+  : ['https://pae-paha.pacioos.hawaii.edu/erddap/griddap/ww3_global.json', 'https://upwell.pfeg.noaa.gov/erddap/griddap/ww3_global.json'];
 
 export interface Ww3Grid {
   times: string[]; // UTC ISO
@@ -22,8 +25,17 @@ export interface Ww3Grid {
 export async function fetchWw3(box = { s: -34.5, n: -24.5, w: -54.5, e: -45.5 }): Promise<Ww3Grid> {
   const start = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 13) + ':00:00Z';
   const sel = `[(${start}):1:(last)][(0.0)][(${box.s}):1:(${box.n})][(${box.w + 360}):1:(${box.e + 360})]`;
-  const url = `${BASE}?Thgt${sel},Tper${sel},Tdir${sel}`;
-  const js = await fetchJson<any>(url, { timeoutMs: 120_000 });
+  let js: any;
+  let lastErr: unknown;
+  for (const base of SERVERS) {
+    try {
+      js = await fetchJson<any>(`${base}?Thgt${sel},Tper${sel},Tdir${sel}`, { timeoutMs: 120_000, retries: 1 });
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!js) throw lastErr;
   const cols: string[] = js.table.columnNames;
   const ix = (n: string) => cols.indexOf(n);
   const rows: any[][] = js.table.rows;
