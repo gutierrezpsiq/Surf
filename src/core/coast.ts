@@ -148,7 +148,23 @@ export function orientation(idx: CoastIndex, snap: Snap, offsetKm = 0.4) {
     return { facing, sea, open, wet: isSea(idx, sea) };
   });
   candidates.sort((a, b) => Number(b.wet) - Number(a.wet) || b.open - a.open);
-  return candidates[0];
+  const best = candidates[0];
+  // Effective facing = mean direction of open water seen from the spot (a cove faces its mouth,
+  // a beach beside a jetty faces the sea, not the jetty). Coast-line tangent is only the fallback.
+  let sx = 0, sy = 0, total = 0;
+  for (let b = 0; b < 360; b += 10) {
+    const km = Math.min(rayHitKm(idx, best.sea, b, 150), 150);
+    const w = km < 1 ? 0 : km / 150;
+    sx += w * Math.sin((b * Math.PI) / 180);
+    sy += w * Math.cos((b * Math.PI) / 180);
+    total += w;
+  }
+  const strength = total ? Math.hypot(sx, sy) / total : 0;
+  if (strength > 0.15) {
+    const open = norm360((Math.atan2(sx, sy) * 180) / Math.PI);
+    return { ...best, facing: open, tangentFacing: best.facing };
+  }
+  return { ...best, tangentFacing: best.facing };
 }
 
 /**
