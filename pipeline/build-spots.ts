@@ -43,10 +43,14 @@ out geom;`;
     const coast: LonLat[][] = [];
     const features: OsmFeature[] = [];
     for (const el of js.elements ?? []) {
-      const pts: LonLat[] = el.type === 'node' ? [[el.lon, el.lat]] : (el.geometry ?? []).map((g: any) => [g.lon, g.lat]);
+      // nodes carry lat/lon, ways `geometry`, relations their members' geometry
+      const geom = (g: any[] | undefined): LonLat[] => (g ?? []).filter((p) => p && p.lon != null).map((p) => [p.lon, p.lat]);
+      const pts: LonLat[] =
+        el.type === 'node' ? [[el.lon, el.lat]] : el.type === 'relation' ? (el.members ?? []).flatMap((m: any) => geom(m.geometry)) : geom(el.geometry);
       if (el.center) pts.push([el.center.lon, el.center.lat]);
+      if (!pts.length) continue;
       const t = el.tags ?? {};
-      if (t.natural === 'coastline') coast.push(pts);
+      if (t.natural === 'coastline') { if (el.type === 'way') coast.push(pts); }
       else if (t.sport === 'surfing') features.push({ kind: 'surf', name: t.name, pts });
       else if (t.man_made) features.push({ kind: t.man_made, pts });
       else if (t.natural === 'bare_rock') features.push({ kind: 'rock', pts });
