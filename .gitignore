@@ -1,0 +1,10 @@
+node_modules
+dist
+out
+*.local
+.env
+.env.*
+!.env.example
+# generated forecast data (produced by the pipeline; spots.json is committed)
+public/data/*
+!public/data/spots.json

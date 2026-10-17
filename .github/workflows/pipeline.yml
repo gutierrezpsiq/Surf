@@ -1,0 +1,93 @@
+name: forecast-pipeline
+
+on:
+  schedule:
+    - cron: '40 1,7,13,19 * * *' # ~1h40 after each 00/06/12/18 UTC model cycle reaches Open-Meteo
+    - cron: '10 4 * * 1' # weekly: rebuild spot database from OSM
+  workflow_dispatch:
+    inputs:
+      rebuild_spots:
+        description: 'Rebuild spots from OpenStreetMap'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      STORMGLASS_API_KEY: ${{ secrets.STORMGLASS_API_KEY }}
+      WINDY_API_KEY: ${{ secrets.WINDY_API_KEY }}
+      OPEN_METEO_API_KEY: ${{ secrets.OPEN_METEO_API_KEY }}
+      COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
+      COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
+      OBS_FEEDS: ${{ vars.OBS_FEEDS }}
+      MARINHA_AVISOS_URL: ${{ vars.MARINHA_AVISOS_URL }}
+      VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+
+      - name: Restore last good data (kept if a run fails)
+        uses: actions/cache/restore@v4
+        with:
+          path: public/data
+          key: forecast-data-${{ github.run_id }}
+          restore-keys: forecast-data-
+      - run: git checkout -- public/data/spots.json
+
+      - name: Rebuild spot database (OSM)
+        if: github.event.schedule == '10 4 * * 1' || inputs.rebuild_spots
+        run: |
+          npm run spots
+          git config user.name "swell-sul-bot"
+          git config user.email "swell-sul-bot@users.noreply.github.com"
+          git add public/data/spots.json
+          git diff --cached --quiet || git commit -m "chore(data): rebuild spot database from OSM" && git push
+
+      - name: Copernicus Marine (optional)
+        if: env.COPERNICUSMARINE_SERVICE_USERNAME != ''
+        continue-on-error: true
+        run: |
+          pip install --quiet copernicusmarine xarray numpy
+          python pipeline/copernicus.py
+
+      - run: npm run pipeline
+      - run: npm run calibrate
+        if: github.event.schedule == '40 1,7,13,19 * * *' && env.SUPABASE_URL != ''
+        continue-on-error: true
+      - run: npm run notify
+        continue-on-error: true
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: public/data
+          key: forecast-data-${{ github.run_id }}
+
+      - name: Build app
+        run: npm run build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY }}
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+      - uses: actions/deploy-pages@v4
