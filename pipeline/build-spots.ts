@@ -32,7 +32,14 @@ async function overpass(): Promise<{ coast: LonLat[][]; features: OsmFeature[] }
 );
 out geom;`;
   try {
-    const js = await fetchJson<any>(OVERPASS, { method: 'POST', body: new URLSearchParams({ data: q }), timeoutMs: 200_000, retries: 1 });
+    const js = await fetchJson<any>(OVERPASS, {
+      method: 'POST',
+      body: new URLSearchParams({ data: q }),
+      // Overpass rejects anonymous clients (HTTP 406) — identify the app per its usage policy
+      headers: { 'User-Agent': 'SwellSul/0.1 (+https://github.com/gutierrezpsiq/Surf)', Accept: 'application/json' },
+      timeoutMs: 200_000,
+      retries: 1,
+    });
     const coast: LonLat[][] = [];
     const features: OsmFeature[] = [];
     for (const el of js.elements ?? []) {
@@ -45,7 +52,7 @@ out geom;`;
       else if (t.natural === 'bare_rock') features.push({ kind: 'rock', pts });
       else if (t.natural) features.push({ kind: t.natural, pts });
     }
-    return { coast: stitch(coast), features };
+    return { coast: stitch(coast).map((l) => decimate(l, 0.25)).filter((l) => l.length > 1), features };
   } catch (e) {
     console.warn(`[spots] Overpass unavailable (${(e as Error).message}); using Natural Earth fallback`);
     return null;
@@ -71,6 +78,14 @@ function stitch(ways: LonLat[][]): LonLat[][] {
     }
     out.push(line);
   });
+  return out;
+}
+
+/** Keep vertices ≥ minKm apart (plus endpoints): full-res OSM coastline is far denser than ray casting needs. */
+function decimate(line: LonLat[], minKm: number): LonLat[] {
+  const out: LonLat[] = [line[0]];
+  for (let i = 1; i < line.length - 1; i++) if (haversineKm(out[out.length - 1], line[i]) >= minKm) out.push(line[i]);
+  if (line.length > 1) out.push(line[line.length - 1]);
   return out;
 }
 

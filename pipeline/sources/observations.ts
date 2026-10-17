@@ -15,7 +15,7 @@ export interface Obs { feed: string; time: string; hs?: number; tp?: number; dir
 
 export function feeds(): ObsFeed[] {
   try {
-    return JSON.parse(process.env.OBS_FEEDS ?? '[]');
+    return JSON.parse(process.env.OBS_FEEDS || '[]');
   } catch {
     console.warn('[obs] OBS_FEEDS is not valid JSON');
     return [];
