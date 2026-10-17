@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { fmtDrive, driveMinutes } from '../core/drive';
 import { compassPt } from '../core/geo';
 import { wetsuit, waveEnergyKj } from '../core/physics';
 import { bestWindow, verdict } from '../core/scoring';
+import { explainHour, Factor } from '../core/explain';
+import { tideStage } from '../core/physics';
 import { nowIndex, PROFILES, scoreSeries } from '../core/spotScore';
 import type { HourPoint, HourScore, Spot, SpotDetail } from '../core/types';
 import { Compass } from '../components/Compass';
@@ -36,6 +38,9 @@ export default function SpotPage() {
 
   const dates = useMemo(() => [...new Set(detail.data?.hours.map((h) => h.t.slice(0, 10)) ?? [])], [detail.data]);
   const [date, setDate] = useState<string>();
+  const [pickedHour, setPickedHour] = useState<number>();
+  const [details, setDetails] = useState(false);
+  const pickHour = useCallback((i: number) => setPickedHour(i), []);
   const sel = date ?? dates.find((d) => d >= new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10)) ?? dates[0];
 
   if (spots.loading || detail.loading) return <Loading what="pico" />;
@@ -48,7 +53,15 @@ export default function SpotPage() {
   const scores = idx.map((i) => scored.scores[i]);
   const win = bestWindow(scores, hours.map((h) => h.day));
   const bestI = win ? scores.findIndex((s) => s.score === win.score) : 0;
-  const best = scores[bestI], bh = hours[bestI];
+  const best = scores[bestI];
+  // hour being explained: the one tapped on the chart, else the best of the day
+  const hi = pickedHour != null && pickedHour < hours.length ? pickedHour : bestI;
+  const bh = hours[hi], hs = scores[hi];
+  const gi = idx[hi];
+  const explanation =
+    bh && hs && hs.reason !== 'sem dados suficientes'
+      ? explainHour(bh, { spot, prefs: PROFILES[st.skill], leadHours: Math.max(0, gi - scored.nowIdx), tide: tideStage(d.hours.map((h) => h.tide), gi), warnings: summary.data?.warnings })
+      : undefined;
   const fav = st.favorites.includes(spot.id);
   const dayBest = (ds: string) => {
     const ii = d.hours.map((h, i) => (h.t.startsWith(ds) && h.day && i >= scored.nowIdx - (ds === sel ? 99 : 0) ? scored.scores[i].score : -1));
@@ -63,7 +76,7 @@ export default function SpotPage() {
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-bold leading-tight">{spot.name}</h1>
           <p className="text-xs text-muted">
-            {spot.state} · praia voltada para {compassPt(spot.facing)} ({spot.facing}°) · {fmtDrive(driveMinutes(home, [spot.lon, spot.lat]))} de carro
+            {spot.city ? `${spot.city} · ` : ''}{spot.state} · praia voltada para {compassPt(spot.facing)} ({spot.facing}°) · {fmtDrive(driveMinutes(home, [spot.lon, spot.lat]))} de carro
             {spot.kind === 'virtual' && ' · trecho gerado automaticamente'}
           </p>
         </div>
@@ -76,7 +89,7 @@ export default function SpotPage() {
         {dates.map((ds) => {
           const b = dayBest(ds);
           return (
-            <button key={ds} role="tab" aria-selected={ds === sel} onClick={() => setDate(ds)} className={`flex flex-col items-center rounded-lg px-2 py-1 min-w-[52px] border ${ds === sel ? 'border-[color:var(--text-primary)]' : 'border-hair'}`}>
+            <button key={ds} role="tab" aria-selected={ds === sel} onClick={() => { setDate(ds); setPickedHour(undefined); }} className={`flex flex-col items-center rounded-lg px-2 py-1 min-w-[52px] border ${ds === sel ? 'border-[color:var(--text-primary)]' : 'border-hair'}`}>
               <span className="text-[11px] text-ink2">{dayShort(ds)}</span>
               <span className="text-xs font-bold rounded px-1.5 mt-0.5" style={{ background: scoreColor(b), color: inkOn(scoreColor(b)) }}>
                 {b < 0 ? '–' : num(b)}
@@ -102,7 +115,19 @@ export default function SpotPage() {
           <p className="text-sm text-ink2">Sem horário de luz com dados para este dia.</p>
         )}
         {best && best.flags.length > 0 && <div className="mt-2"><Flags flags={best.flags} /></div>}
-        <ScoreBars hours={hours} scores={scores} win={win} />
+        <ScoreBars hours={hours} scores={scores} win={win} selected={hi} onPick={pickHour} />
+        <p className="text-[11px] text-muted -mt-1">Toque numa hora para ver a explicação dela.</p>
+        {explanation && hs && (
+          <div className="mt-3 border-t border-hair pt-3">
+            <p className="text-sm">
+              <b>Por que {num(hs.score)} às {hh(bh.t)}?</b> {explanation.summary}
+            </p>
+            <button className="mt-2 text-sm font-semibold underline" aria-expanded={details} onClick={() => setDetails(!details)}>
+              {details ? 'Menos detalhes ▴' : 'Mais detalhes ▾'}
+            </button>
+            {details && <Details factors={explanation.factors} confidence={explanation.confidence} conf={hs.conf} flags={hs.flags} />}
+          </div>
+        )}
       </section>
 
       <Section title="Ondas" right={<span className="text-xs text-muted">consenso ± dispersão · seta = de onde vem</span>}>
@@ -192,7 +217,7 @@ function modelsUsed(d: SpotDetail) {
   return [...ks].map((k) => MODEL_LABEL[k.replace('w:', '')] ?? k).join(', ');
 }
 
-function ScoreBars({ hours, scores, win }: { hours: HourPoint[]; scores: HourScore[]; win?: { start: number; end: number } }) {
+function ScoreBars({ hours, scores, win, selected, onPick }: { hours: HourPoint[]; scores: HourScore[]; win?: { start: number; end: number }; selected: number; onPick: (i: number) => void }) {
   const option = useMemo<EOption>(() => {
     const c = chrome();
     return {
@@ -205,13 +230,16 @@ function ScoreBars({ hours, scores, win }: { hours: HourPoint[]; scores: HourSco
         {
           type: 'bar',
           barCategoryGap: '12%',
-          data: scores.map((s, i) => (hours[i].day ? { value: s.score, itemStyle: { color: scoreColor(s.score), borderRadius: [3, 3, 0, 0] } } : { value: 0.25, itemStyle: { color: c.grid } })),
+          data: scores.map((s, i) => {
+            const sel = i === selected ? { borderColor: c.text, borderWidth: 2 } : {};
+            return hours[i].day ? { value: s.score, itemStyle: { color: scoreColor(s.score), borderRadius: [3, 3, 0, 0], ...sel } } : { value: 0.25, itemStyle: { color: c.grid, ...sel } };
+          }),
           markArea: win ? { silent: true, itemStyle: { color: 'transparent', borderColor: c.text, borderWidth: 1.5, borderType: 'dashed' }, data: [[{ xAxis: win.start }, { xAxis: win.end }]] } : undefined,
         },
       ],
     };
-  }, [hours, scores, win]);
-  return <div className="mt-3"><EChart option={option} height={130} /></div>;
+  }, [hours, scores, win, selected]);
+  return <div className="mt-3"><EChart option={option} height={130} onClick={onPick} /></div>;
 }
 
 const arrowRot = (fromDeg: number) => -(fromDeg + 180); // ECharts rotates counter-clockwise; arrow points where it goes
@@ -335,5 +363,77 @@ function WeatherStrip({ hours, scores }: { hours: HourPoint[]; scores: HourScore
         </div>
       ))}
     </div>
+  );
+}
+
+const EFFECT: Record<Factor['effect'], { icon: string; label: string }> = {
+  ajuda: { icon: '▲', label: 'ajuda' },
+  neutro: { icon: '■', label: 'neutro' },
+  atrapalha: { icon: '▼', label: 'atrapalha' },
+};
+
+function Details({ factors, confidence, conf, flags }: { factors: Factor[]; confidence: string; conf: HourScore['conf']; flags: HourScore['flags'] }) {
+  return (
+    <div className="mt-3 space-y-3">
+      {factors.map((f) => (
+        <div key={f.key} className="rounded-lg border border-hair p-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-semibold text-sm">{f.label}</h3>
+            <span className="text-xs font-semibold whitespace-nowrap" style={{ color: f.effect === 'atrapalha' ? 'var(--critical)' : 'var(--text-secondary)' }}>
+              <span aria-hidden>{EFFECT[f.effect].icon}</span> {EFFECT[f.effect].label}
+            </span>
+          </div>
+          <div className="mt-1.5 h-1.5 rounded-full bg-hair overflow-hidden" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(f.q * 100)} aria-label={`${f.label}: ${Math.round(f.q * 100)} % do ideal`}>
+            <div className="h-full rounded-full" style={{ width: `${Math.round(f.q * 100)}%`, background: scoreColor(f.q * 10) }} />
+          </div>
+          <dl className="text-xs mt-2 grid grid-cols-[64px_1fr] gap-x-2 gap-y-1">
+            <dt className="text-muted">Previsão</dt><dd>{f.forecast}</dd>
+            <dt className="text-muted">Ideal</dt><dd>{f.ideal}</dd>
+          </dl>
+          <p className="text-xs text-ink2 mt-1.5">{f.why}</p>
+        </div>
+      ))}
+      <div className="rounded-lg border border-hair p-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-sm">Confiança</h3>
+          <ConfBadge conf={conf} compact />
+        </div>
+        <p className="text-xs text-ink2 mt-1.5">{confidence} A confiança não muda a nota: diz o quanto dá para acreditar nela.</p>
+      </div>
+      {flags.length > 0 && (
+        <div className="rounded-lg border border-hair p-3">
+          <h3 className="font-semibold text-sm mb-1.5">Alertas de segurança</h3>
+          <Flags flags={flags} />
+          <p className="text-xs text-ink2 mt-1.5">Com alerta, a nota é limitada (no máximo 3–4) mesmo que as ondas estejam boas.</p>
+        </div>
+      )}
+      <Glossary />
+    </div>
+  );
+}
+
+function Glossary() {
+  const items: [string, string][] = [
+    ['Swell', 'Ondulação formada por tempestades longe da costa. É o que traz ondas boas e organizadas.'],
+    ['Mar de vento', 'Ondas criadas pelo vento local: curtas, fracas e bagunçadas.'],
+    ['Período', 'Segundos entre uma onda e a seguinte. Quanto maior, mais força e organização.'],
+    ['Terral', 'Vento que sopra da terra para o mar. Segura a onda e deixa a parede lisa: o melhor vento.'],
+    ['Maral', 'Vento do mar para a terra. Desmancha as ondas: o pior vento.'],
+    ['Glassy', 'Sem vento: mar espelhado, condição ideal.'],
+    ['Janela de swell', 'Direções de onde o swell consegue chegar ao pico sem ser bloqueado por costões ou ilhas.'],
+    ['Arrebentação', 'Onde a onda quebra. A altura mostrada aqui é a estimada nesse ponto, não em mar aberto.'],
+  ];
+  return (
+    <details className="rounded-lg border border-hair p-3">
+      <summary className="font-semibold text-sm cursor-pointer">Como ler a previsão (glossário)</summary>
+      <dl className="text-xs mt-2 space-y-1.5">
+        {items.map(([t, d]) => (
+          <div key={t}>
+            <dt className="font-semibold inline">{t}: </dt>
+            <dd className="inline text-ink2">{d}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }

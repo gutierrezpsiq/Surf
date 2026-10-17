@@ -48,8 +48,8 @@ nota = 10 · tamanho^0.8 · (0.35 + 0.65·período) · (0.4 + 0.6·exposição) 
 ## Telas
 1. **Agora** — veredito grande, top 5 do dia com janela, confiança, tempo de carro (Porto Alegre ou GPS). Depois do anoitecer, passa para o dia seguinte.
 2. **Semana** — mapa de calor picos × dias (melhor nota do dia).
-3. **Mapa** — MapLibre com base própria offline (Natural Earth); camadas de altura, período, temperatura da água, chuva, direção do swell e vento animado (partículas), com controle de tempo.
-4. **Pico** — barra de nota por hora com melhor janela, ondas (consenso ± dispersão, setas de direção), vento colorido por terral/maral, maré com sombreamento noturno, rosa dos ventos (janela de swell × swell × vento), comparação por modelo, água + roupa, tempo, perigos.
+3. **Mapa** — MapLibre com base própria offline (Natural Earth), limites e nomes dos municípios (IBGE), nomes dos picos ao aproximar e, em zoom regional, só o melhor pico de cada trecho; camadas de altura, período, temperatura da água, chuva, direção do swell e vento animado (partículas), com controle de tempo.
+4. **Pico** — barra de nota por hora com melhor janela; **“Por que essa nota?”** com resumo do que ajuda/atrapalha e **“Mais detalhes”** explicando cada fator (previsão × ideal para surfar, em linguagem para iniciantes) e um glossário; toque numa hora para ver a explicação dela; ondas (consenso ± dispersão, setas de direção), vento colorido por terral/maral, maré com sombreamento noturno, rosa dos ventos (janela de swell × swell × vento), comparação por modelo, água + roupa, tempo, perigos.
 5. **Comparar** — 2 a 4 picos lado a lado.
 6. **Ajustes** — opcional: nível, origem, distância máxima, favoritos, notificações.
 
@@ -88,4 +88,4 @@ pipeline/      run.ts (agendado), build-spots.ts, calibrate.ts, notify.ts, sourc
 supabase/      schema (histórico, calibração, inscrições push) · data/coastline.json (Natural Earth recortado)
 tests/         vitest
 ```
-Dados de base: Natural Earth (domínio público), © colaboradores do OpenStreetMap (ODbL), Open‑Meteo (CC BY 4.0).
+Dados de base: Natural Earth (domínio público), IBGE (malhas municipais), © colaboradores do OpenStreetMap (ODbL), Open‑Meteo (CC BY 4.0).

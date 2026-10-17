@@ -35,7 +35,7 @@ export function axisStyle() {
   };
 }
 
-export function EChart({ option, height = 160 }: { option: EOption; height?: number }) {
+export function EChart({ option, height = 160, onClick }: { option: EOption; height?: number; onClick?: (dataIndex: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const inst = useRef<echarts.ECharts>();
   useEffect(() => {
@@ -51,5 +51,24 @@ export function EChart({ option, height = 160 }: { option: EOption; height?: num
   useEffect(() => {
     inst.current?.setOption(option, true);
   }, [option]);
+  useEffect(() => {
+    const i = inst.current;
+    if (!i || !onClick) return;
+    const h = (p: { dataIndex: number }) => onClick(p.dataIndex);
+    i.on('click', h);
+    // clicks anywhere in the plot area (not only on the bar) select the nearest category
+    const zr = i.getZr();
+    const z = (e: { offsetX: number; offsetY: number }) => {
+      const pt = [e.offsetX, e.offsetY];
+      if (!i.containPixel('grid', pt)) return;
+      const [x] = i.convertFromPixel({ seriesIndex: 0 }, pt) as number[];
+      if (Number.isFinite(x)) onClick(Math.round(x));
+    };
+    zr.on('click', z);
+    return () => {
+      i.off('click', h);
+      zr.off('click', z);
+    };
+  }, [onClick]);
   return <div ref={ref} style={{ height, width: '100%' }} />;
 }

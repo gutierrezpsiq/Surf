@@ -6,7 +6,7 @@ import { fmtDrive } from '../core/drive';
 import type { GridData } from '../core/types';
 import { ConfBadge, ErrorBox, Loading } from '../components/ui';
 import { fieldColor, inkOn, isDark, ORANGE, scoreColor } from '../lib/colors';
-import { loadGrid, loadLand, Row, useAsync, useForecast } from '../lib/data';
+import { loadCities, loadGrid, loadLand, Row, useAsync, useForecast } from '../lib/data';
 import { dayShort, hh, num } from '../lib/format';
 
 type Field = 'none' | 'hs' | 'tp' | 'sst' | 'rain';
@@ -107,7 +107,7 @@ function MiniCard({ row, hourIdx, tLabel, onClose }: { row: Row; hourIdx: number
       <div className="flex justify-between items-start gap-2">
         <div className="min-w-0">
           <p className="font-semibold truncate">{row.spot.name}</p>
-          <p className="text-xs text-muted">{row.spot.state} · {fmtDrive(row.drive)} de carro</p>
+          <p className="text-xs text-muted">{row.spot.city ? `${row.spot.city} · ` : ''}{row.spot.state} · {fmtDrive(row.drive)} de carro</p>
         </div>
         <button onClick={onClose} aria-label="Fechar" className="text-muted">✕</button>
       </div>
@@ -127,6 +127,7 @@ function MapView({ rows, grid, ti, hourIdx, field, wind, arrows, onPick }: { row
   const windCv = useRef<HTMLCanvasElement>(null);
   const map = useRef<maplibregl.Map>();
   const markers = useRef<Map<string, { m: maplibregl.Marker; el: HTMLDivElement }>>(new Map());
+  const cityLabels = useRef<{ el: HTMLDivElement; named: boolean; mk: maplibregl.Marker }[]>([]);
   const [ready, setReady] = useState(0);
   const [land, setLand] = useState<number[][][][]>();
   const [zoom, setZoom] = useState(5.6);
@@ -149,6 +150,7 @@ function MapView({ rows, grid, ti, hourIdx, field, wind, arrows, onPick }: { row
       maxZoom: 13,
       attributionControl: { compact: true, customAttribution: 'Natural Earth · Open-Meteo' },
       dragRotate: false,
+      hash: 'map',
       pitchWithRotate: false,
     });
     m.touchZoomRotate.disableRotation();
@@ -161,6 +163,24 @@ function MapView({ rows, grid, ti, hourIdx, field, wind, arrows, onPick }: { row
         m.addLayer({ id: 'coast', type: 'line', source: 'land', paint: { 'line-color': dark ? '#55544f' : '#a9a79f', 'line-width': 0.8 } });
       } catch {
         /* basemap is decoration; markers still work */
+      }
+      try {
+        const cities = await loadCities();
+        m.addSource('cities', { type: 'geojson', data: cities as any });
+        m.addLayer({ id: 'city-lines', type: 'line', source: 'cities', paint: { 'line-color': dark ? '#7d7b74' : '#8f8d86', 'line-width': 1, 'line-dasharray': [3, 2] } });
+        // City names as HTML labels (no glyph server needed). Cities with named spots show first.
+        for (const f of cities.features) {
+          const el = document.createElement('div');
+          el.className = 'city-label';
+          el.textContent = f.properties.name;
+          el.dataset.named = String(f.properties.named);
+          el.setAttribute('aria-hidden', 'true');
+          // anchored on its right edge: the name extends inland (west), away from the spot markers on the coast
+          cityLabels.current.push({ el, named: f.properties.named, mk: new maplibregl.Marker({ element: el, anchor: 'right', offset: [-8, 0] }).setLngLat(f.properties.label).addTo(m) });
+        }
+        setReady((x) => x + 1);
+      } catch {
+        /* cities.json is produced by the spot rebuild (IBGE); optional */
       }
       setReady((x) => x + 1);
     });
@@ -194,10 +214,45 @@ function MapView({ rows, grid, ti, hourIdx, field, wind, arrows, onPick }: { row
       entry.el.style.opacity = r.spot.kind === 'virtual' ? '0.8' : '1';
       // auto-generated stretches only once zoomed in, to keep the regional view readable
       entry.el.style.display = r.spot.kind === 'virtual' && zoom < 7.5 ? 'none' : '';
+      entry.el.dataset.score = String(s);
       entry.el.textContent = s < 0 ? '☾' : num(s, 0);
+      if (zoom >= 9) {
+        const nm = document.createElement('span');
+        nm.className = 'spot-name';
+        nm.textContent = r.spot.name.replace(/^.*? – /, '');
+        entry.el.appendChild(nm);
+      }
       entry.el.title = `${r.spot.name}: ${s < 0 ? 'noite' : num(s)}`;
     }
+    // declutter: where markers would overlap, keep the best-scoring spot (zoom in to see the rest)
+    const placed: [number, number][] = [];
+    const visible = rows
+      .map((r) => ({ r, e: markers.current.get(r.spot.id)! }))
+      .filter((x) => x.e.el.style.display !== 'none')
+      .sort((a, b) => Number(b.e.el.dataset.score) - Number(a.e.el.dataset.score) || Number(a.r.spot.kind === 'virtual') - Number(b.r.spot.kind === 'virtual'));
+    for (const { r, e } of visible) {
+      const p = m.project([r.spot.lon, r.spot.lat]);
+      if (placed.some(([x, y]) => Math.abs(x - p.x) < 26 && Math.abs(y - p.y) < 20)) e.el.style.display = 'none';
+      else placed.push([p.x, p.y]);
+    }
   }, [rows, hourIdx, onPick, ready, zoom]);
+
+  // city labels: greedy collision avoidance — cities with named spots first, then the rest while they fit
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const placed: [number, number, number, number][] = [];
+    const order = [...cityLabels.current].sort((a, b) => Number(b.named) - Number(a.named));
+    for (const c of order) {
+      const p = m.project(c.mk.getLngLat());
+      const w = c.el.textContent!.length * 6.4 + 6, h = 14;
+      const box: [number, number, number, number] = [p.x - 8 - w, p.y - h / 2, p.x - 8, p.y + h / 2];
+      const hit = placed.some((q) => box[0] < q[2] && box[2] > q[0] && box[1] < q[3] && box[3] > q[1]);
+      const show = !hit && (c.named || zoom >= 7);
+      c.el.style.display = show ? '' : 'none';
+      if (show) placed.push(box);
+    }
+  }, [zoom, ready]);
 
   // scalar field + direction arrows
   useEffect(() => {

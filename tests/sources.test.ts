@@ -50,3 +50,23 @@ describe('observations', () => {
     expect(o[0]).toMatchObject({ feed: 'b1', time: '2026-10-17T03:00:00.000Z', hs: 1.6, tp: 11, dir: 140 });
   });
 });
+
+import { inRing, labelPoint, municipalityAt, Municipality } from '../pipeline/sources/ibge';
+describe('IBGE municipalities', () => {
+  const sq = (x: number, y: number): [number, number][] => [[x, y], [x + 0.2, y], [x + 0.2, y + 0.2], [x, y + 0.2], [x, y]];
+  const ms: Municipality[] = [
+    { code: '4321204', name: 'Torres', state: 'RS', rings: [sq(-49.9, -29.4)] },
+    { code: '4321600', name: 'Tramandaí', state: 'RS', rings: [sq(-50.3, -30.1)] },
+  ];
+  it('finds the containing or nearest (offshore spot) municipality', () => {
+    expect(inRing([-49.8, -29.3], ms[0].rings[0])).toBe(true);
+    expect(municipalityAt(ms, [-49.8, -29.3])?.name).toBe('Torres');
+    expect(municipalityAt(ms, [-49.69, -29.3])?.name).toBe('Torres'); // ~1 km offshore
+    expect(municipalityAt(ms, [-48.0, -29.3])).toBeUndefined();
+  });
+  it('labels at the centroid', () => {
+    const [x, y] = labelPoint(ms[0]);
+    expect(x).toBeCloseTo(-49.8, 5);
+    expect(y).toBeCloseTo(-29.3, 5);
+  });
+});

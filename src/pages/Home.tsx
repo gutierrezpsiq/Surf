@@ -126,7 +126,7 @@ export default function Home() {
                   <div className="flex items-center gap-2 text-sm mt-0.5">
                     {w && <b>{hh(w.start)}–{hh(w.end)}</b>}
                     <ConfBadge conf={r.day.conf} compact />
-                    <span className="text-xs text-muted">{r.spot.state}</span>
+                    <span className="text-xs text-muted truncate">{r.spot.city ? `${r.spot.city}, ` : ''}{r.spot.state}</span>
                   </div>
                   {r.day.reason && <p className="text-xs text-ink2 mt-1 line-clamp-2">{r.day.reason}</p>}
                   <div className="mt-2">

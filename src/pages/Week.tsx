@@ -58,7 +58,7 @@ export default function Week() {
                 <tr key={r.spot.id} onClick={() => nav(`/spot/${r.spot.id}`)} className="cursor-pointer">
                   <th scope="row" className="text-left font-normal sticky left-0 bg-surface px-2 py-1 max-w-[130px] truncate">
                     {r.spot.name}
-                    <span className="block text-[10px] text-muted">{r.spot.state} · {fmtDrive(r.drive)}</span>
+                    <span className="block text-[10px] text-muted truncate">{r.spot.city ?? r.spot.state} · {fmtDrive(r.drive)}</span>
                   </th>
                   {data.dates.map((date) => {
                     const d = r.sum.days.find((x) => x.date === date);

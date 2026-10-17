@@ -31,6 +31,8 @@ export const loadSpots = () => get<{ spots: Spot[]; coastSource: string }>(`${BA
 export const loadSummary = (skill: Parameters<typeof summaryFile>[0]) => get<Summary>(`${DATA_URL}${summaryFile(skill)}`);
 export const loadDetail = (id: string) => get<SpotDetail>(`${DATA_URL}spot/${id}.json`);
 export const loadGrid = () => get<GridData>(`${DATA_URL}grid.json`);
+export interface CityFeature { type: 'Feature'; properties: { name: string; state: string; label: [number, number]; named: boolean }; geometry: { type: 'MultiPolygon'; coordinates: number[][][][] } }
+export const loadCities = () => get<{ type: 'FeatureCollection'; features: CityFeature[] }>(`${BASE}basemap/cities.json`);
 export const loadLand = () => get<{ type: 'Feature'; geometry: { type: 'MultiPolygon'; coordinates: number[][][][] } }>(`${BASE}basemap/land.json`);
 
 type State<T> = { data?: T; error?: string; loading: boolean };

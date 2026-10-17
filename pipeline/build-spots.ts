@@ -13,13 +13,14 @@ import { haversineKm, LonLat, norm360, compassPt } from '../src/core/geo';
 import { regionFor } from '../src/core/regions';
 import type { BreakType, Spot } from '../src/core/types';
 import { fetchJson } from './http';
+import { fetchMunicipalities, labelPoint, Municipality, municipalityAt } from './sources/ibge';
 import { SEEDS } from './seeds';
 
 const BBOX = { s: -33.76, w: -54.0, n: -25.32, e: -47.8 }; // PR/SC/RS coast (Chuí → PR/SP border)
 const OVERPASS = process.env.OVERPASS_URL ?? 'https://overpass-api.de/api/interpreter';
 const VIRTUAL_SPACING_KM = 12;
 /** Seed coordinates are approximate: search this far for the most exposed stretch of coast. */
-const SEED_SEARCH_KM = 0.7;
+const SEED_SEARCH_KM = 1.2;
 /** Structures/rocks closer than this shape the break and its hazards. */
 const FEATURE_KM = 0.4;
 
@@ -230,8 +231,47 @@ async function main() {
       const name = `Litoral ${d} km ${dir} de ${cityRef}`;
       const spot = make(name, p, 'virtual', a);
       spot.id = `v-${slug(name)}`;
+      spot.city = cityRef;
       spots.push(spot);
     }
+  }
+
+  // Municipalities (IBGE): city of each spot, readable names for virtual points, map boundaries
+  for (const s of spots) s.city ??= SEEDS.find((x) => x.name === s.name)?.city;
+  let munis: Municipality[] = [];
+  try {
+    munis = await fetchMunicipalities();
+    console.log(`[spots] IBGE: ${munis.length} municipalities`);
+  } catch (e) {
+    console.warn(`[spots] IBGE unavailable (${(e as Error).message}); keeping seed city names, no map boundaries`);
+  }
+  if (munis.length) {
+    const used = new Map<string, { m: Municipality; named: boolean }>();
+    for (const s of spots) {
+      const m = municipalityAt(munis, [s.lon, s.lat]);
+      if (!m) continue;
+      s.city = m.name;
+      const u = used.get(m.code);
+      used.set(m.code, { m, named: (u?.named ?? false) || s.kind !== 'virtual' });
+    }
+    // "Litoral de Mostardas · 2" instead of distance-from-nearest-spot names, numbered north → south
+    const byCity = new Map<string, Spot[]>();
+    for (const s of spots.filter((x) => x.kind === 'virtual' && x.city)) byCity.set(s.city!, [...(byCity.get(s.city!) ?? []), s]);
+    for (const [city, list] of byCity) {
+      list.sort((a, b) => b.lat - a.lat);
+      list.forEach((s, k) => {
+        s.name = list.length > 1 ? `Litoral de ${city} · ${k + 1}` : `Litoral de ${city}`;
+        s.id = `v-${slug(s.name)}`;
+      });
+    }
+    const features = [...used.values()].map(({ m, named }) => ({
+      type: 'Feature',
+      properties: { name: m.name, state: m.state, label: labelPoint(m).map((x) => +x.toFixed(4)), named },
+      geometry: { type: 'MultiPolygon', coordinates: m.rings.map((r) => [decimate(r, 0.3).map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)])]) },
+    }));
+    mkdirSync('public/basemap', { recursive: true });
+    writeFileSync('public/basemap/cities.json', JSON.stringify({ type: 'FeatureCollection', source: 'IBGE malhas municipais', features }));
+    console.log(`[spots] cities.json: ${features.length} coastal municipalities`);
   }
 
   // ensure unique ids

@@ -106,7 +106,8 @@ export interface ScoreContext {
 
 const fmt = (x: number, d = 1) => x.toFixed(d).replace('.', ',');
 
-export function scoreHour(h: HourPoint, ctx: ScoreContext): HourScore {
+/** The individual score components for one hour (shared by the score and its explanation). */
+export function components(h: HourPoint, ctx: ScoreContext) {
   const p = ctx.prefs ?? DEFAULT_PREFS;
   const br = breaking(ctx.spot, h);
   const rel = windRelation(h.windDir.v, ctx.spot.offshore, h.wind.v);
@@ -120,6 +121,11 @@ export function scoreHour(h: HourPoint, ctx: ScoreContext): HourScore {
   if (ctx.tide === 'seca' && (ctx.spot.breakType === 'point' || ctx.spot.breakType === 'reef')) tideMod = 0.92;
   const energyKj = waveEnergyKj(br.h, br.t);
   const energyMod = energyKj < 15 ? 0.9 : 1;
+  return { p, br, rel, sq, tq, dq, wq, tideMod, energyKj, energyMod };
+}
+
+export function scoreHour(h: HourPoint, ctx: ScoreContext): HourScore {
+  const { p, br, rel, sq, tq, dq, wq, tideMod, energyKj, energyMod } = components(h, ctx);
 
   let score = 10 * Math.pow(sq, 0.8) * (0.35 + 0.65 * tq) * dq * wq * tideMod * energyMod;
   if (rel === 'glassy' && sq > 0.3) score += 0.3;

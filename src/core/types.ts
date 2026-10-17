@@ -7,6 +7,8 @@ export type BreakType = 'beach' | 'point' | 'jetty' | 'reef' | 'pier';
 export interface Spot {
   id: string;
   name: string;
+  /** Municipality (IBGE) — or the seed list's city when IBGE is unavailable. */
+  city?: string;
   state: StateCode;
   region: CalibRegion;
   lat: number;
