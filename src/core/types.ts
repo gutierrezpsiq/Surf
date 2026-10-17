@@ -92,6 +92,8 @@ export interface DayBest {
   red: boolean;
   /** One-line explanation at the day's best hour. */
   reason?: string;
+  /** Key numbers at the day's best hour (breaking height m, period s, swell dir, wind km/h + relation). */
+  facts?: { h: number; t: number; dir: number; wind: number; rel: WindRelation };
 }
 
 /** Per-spot summary (what Home / Week / Map need). */

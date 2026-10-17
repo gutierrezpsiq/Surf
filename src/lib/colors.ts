@@ -3,7 +3,20 @@
  * so colour never carries the value alone). Verdict = reserved status colours + icon + label.
  * Model lines = fixed-order categorical slots. Validated with the dataviz palette validator.
  */
-const BLUE = ['#cde2fb', '#b7d3f6', '#9ec5f4', '#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6', '#256abf', '#1c5cab', '#184f95', '#104281', '#0d366b'];
+/**
+ * Score bands: one-hue (teal) ordinal ramp, validated with the dataviz palette validator
+ * (--ordinal, light and dark surfaces). Each band also carries a word, so colour never
+ * carries the meaning alone.
+ */
+export const BANDS = [
+  { min: 0, label: 'Ruim' },
+  { min: 2, label: 'Fraco' },
+  { min: 4, label: 'Regular' },
+  { min: 6, label: 'Bom' },
+  { min: 8, label: 'Excelente' },
+] as const;
+const TEAL_LIGHT = ['#74bfb0', '#45a696', '#25897c', '#156a60', '#0b4c45'];
+const TEAL_DARK = ['#2a6a61', '#2f8a7d', '#45a999', '#74c6b6', '#b2e3d8'];
 
 export function isDark(): boolean {
   if (typeof window === 'undefined') return false;
@@ -12,11 +25,20 @@ export function isDark(): boolean {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
 }
 
-/** Score 0–10 → ramp colour (light: pale→deep; dark: deep→pale, low end recedes into the surface). */
+export function bandIndex(score: number): number {
+  let i = 0;
+  BANDS.forEach((b, k) => {
+    if (score >= b.min) i = k;
+  });
+  return i;
+}
+
+export const bandLabel = (score: number | null | undefined) => (score == null || score < 0 ? '' : BANDS[bandIndex(score)].label);
+
+/** Score 0–10 → band colour (darker = better on light, brighter = better on dark). */
 export function scoreColor(score: number | null | undefined, dark = isDark()): string {
   if (score == null || score < 0) return dark ? '#262624' : '#ecebe6';
-  const i = Math.round((Math.max(0, Math.min(10, score)) / 10) * (BLUE.length - 1));
-  return dark ? BLUE[BLUE.length - 1 - i] : BLUE[i];
+  return (dark ? TEAL_DARK : TEAL_LIGHT)[bandIndex(Math.max(0, Math.min(10, score)))];
 }
 
 export function inkOn(bg: string): string {

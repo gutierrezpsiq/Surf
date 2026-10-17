@@ -250,7 +250,8 @@ async function main() {
     for (const s of spots) {
       const m = municipalityAt(munis, [s.lon, s.lat]);
       if (!m) continue;
-      s.city = m.name;
+      // curated seeds keep their city (e.g. Torres – Molhes sits on the RS/SC border river)
+      if (s.kind !== 'seed' || !s.city) s.city = m.name;
       const u = used.get(m.code);
       used.set(m.code, { m, named: (u?.named ?? false) || s.kind !== 'virtual' });
     }

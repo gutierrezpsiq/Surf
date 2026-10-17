@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom';
 import { fmtDrive } from '../core/drive';
 import { confRank, verdict } from '../core/scoring';
 import type { DayBest } from '../core/types';
-import { ConfBadge, ErrorBox, Flags, HourStrip, Loading, ScoreLegend, ScorePill, VerdictBadge } from '../components/ui';
+import { ConfBadge, DayBar, ErrorBox, Flags, Loading, ScoreLegend, ScorePill, VerdictBadge } from '../components/ui';
+import { compassPt } from '../core/geo';
+import type { WindRelation } from '../core/types';
 import { Row, useForecast } from '../lib/data';
 import { dayShort, hh, num, todayLocal } from '../lib/format';
 import { useSettings } from '../lib/settings';
@@ -29,7 +31,17 @@ export default function Home() {
     return rows
       .map((r) => ({ ...r, day: r.sum.days.find((d) => d.date === today) }))
       .filter((r): r is Ranked => !!r.day && (anyDistance || r.drive <= st.maxDriveMin))
-      .sort((a, b) => b.day.score - a.day.score || confRank(b.day.conf) - confRank(a.day.conf) || a.drive - b.drive);
+      .sort((a, b) => {
+        // near-ties (< 0.3) go to named spots over auto-generated stretches
+        const d = b.day.score - a.day.score;
+        if (Math.abs(d) < 0.3) {
+          const v = Number(a.spot.kind === 'virtual') - Number(b.spot.kind === 'virtual');
+          if (v) return v;
+        }
+        return d || confRank(b.day.conf) - confRank(a.day.conf) || a.drive - b.drive;
+      })
+      // one spot per city keeps the Top 5 varied
+      .filter((r, i, all) => all.findIndex((x) => (x.spot.city ?? x.spot.id) === (r.spot.city ?? r.spot.id)) === i);
   }, [rows, today, anyDistance, st.maxDriveMin]);
 
   const nextBest = useMemo(() => {
@@ -111,26 +123,33 @@ export default function Home() {
         {top.map((r, i) => {
           const w = r.day.window;
           const from = w ? +w.start.slice(11, 13) : undefined, to = w ? +w.end.slice(11, 13) : undefined;
+          const f = r.day.facts;
           return (
             <li key={r.spot.id}>
               <Link to={`/spot/${r.spot.id}`} className="card p-3 flex gap-3 items-start">
                 <ScorePill score={r.day.score} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <p className="font-semibold truncate">
-                      <span className="text-muted mr-1">{i + 1}.</span>
-                      {r.spot.name}
-                    </p>
-                    <span className="text-xs text-muted whitespace-nowrap">{fmtDrive(r.drive)}</span>
+                    <p className="font-semibold truncate">{r.spot.name}</p>
+                    <span className="text-xs text-muted whitespace-nowrap">🚗 {fmtDrive(r.drive)}</span>
                   </div>
-                  <div className="flex items-center gap-2 text-sm mt-0.5">
-                    {w && <b>{hh(w.start)}–{hh(w.end)}</b>}
-                    <ConfBadge conf={r.day.conf} compact />
-                    <span className="text-xs text-muted truncate">{r.spot.city ? `${r.spot.city}, ` : ''}{r.spot.state}</span>
-                  </div>
-                  {r.day.reason && <p className="text-xs text-ink2 mt-1 line-clamp-2">{r.day.reason}</p>}
-                  <div className="mt-2">
-                    <HourStrip hourly={r.sum.hourly} start={dayOffset} window={from != null ? { from, to: to! } : undefined} />
+                  <p className="text-xs text-muted truncate">
+                    {r.spot.city ? `${r.spot.city}, ` : ''}
+                    {r.spot.state} · <ConfBadge conf={r.day.conf} />
+                  </p>
+                  {f ? (
+                    <div className="flex flex-wrap gap-1.5 mt-2 text-xs">
+                      <Fact icon="🌊" text={`${num(f.h)} m · ${f.t} s · ${compassPt(f.dir)}`} label="Onda na arrebentação, período e direção" />
+                      <Fact icon="💨" text={f.rel === 'glassy' ? 'sem vento' : `${REL_SHORT[f.rel]} ${f.wind} km/h`} label="Vento" />
+                    </div>
+                  ) : (
+                    r.day.reason && <p className="text-xs text-ink2 mt-1 line-clamp-2">{r.day.reason}</p>
+                  )}
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <span className="text-xs font-semibold whitespace-nowrap">{w ? `${hh(w.start)}–${hh(w.end)}` : 'sem janela'}</span>
+                    <div className="flex-1">
+                      <DayBar hourly={r.sum.hourly} start={dayOffset} window={from != null ? { from, to: to! } : undefined} score={r.day.score} />
+                    </div>
                   </div>
                   {r.day.red && r.sum.now && <div className="mt-1.5"><Flags flags={r.sum.now.flags} /></div>}
                 </div>
@@ -139,10 +158,22 @@ export default function Home() {
           );
         })}
       </ol>
-      <div className="flex justify-between items-center">
+      <div className="space-y-1">
         <ScoreLegend />
-        <span className="text-[11px] text-muted">faixa = horário da melhor janela</span>
+        <p className="text-[11px] text-muted">Barra = horas de luz do dia; trecho colorido = melhor janela para surfar.</p>
       </div>
     </div>
+  );
+}
+
+const REL_SHORT: Record<WindRelation, string> = { glassy: 'sem vento', terral: 'terral', 'terral-lateral': 'terral-lat.', lateral: 'lateral', 'maral-lateral': 'maral-lat.', maral: 'maral' };
+
+function Fact({ icon, text, label }: { icon: string; text: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 border border-hair" title={label}>
+      <span aria-hidden>{icon}</span>
+      <span className="sr-only">{label}: </span>
+      {text}
+    </span>
   );
 }

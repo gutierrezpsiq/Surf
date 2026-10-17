@@ -1,14 +1,18 @@
 import type { ReactNode } from 'react';
 import type { Confidence, SafetyFlag, Verdict } from '../core/types';
-import { inkOn, scoreColor, STATUS } from '../lib/colors';
+import { bandLabel, BANDS, inkOn, scoreColor, STATUS } from '../lib/colors';
 import { num } from '../lib/format';
 
 export function ScorePill({ score, size = 'md', title }: { score: number | null | undefined; size?: 'sm' | 'md' | 'lg'; title?: string }) {
   const bg = scoreColor(score);
-  const cls = size === 'lg' ? 'text-3xl w-20 h-20 rounded-2xl' : size === 'sm' ? 'text-sm w-9 h-7 rounded-md' : 'text-xl w-14 h-12 rounded-xl';
+  const ink = inkOn(bg);
+  const empty = score == null || score < 0;
+  const cls = size === 'lg' ? 'w-20 h-20 rounded-2xl' : size === 'sm' ? 'w-9 h-7 rounded-md' : 'w-16 h-14 rounded-xl';
+  const num_ = size === 'lg' ? 'text-3xl' : size === 'sm' ? 'text-sm' : 'text-xl';
   return (
-    <div className={`${cls} flex items-center justify-center font-bold shrink-0`} style={{ background: bg, color: inkOn(bg) }} title={title ?? 'Nota de 0 a 10'} aria-label={`nota ${num(score)} de 10`}>
-      {score == null || score < 0 ? '–' : num(score)}
+    <div className={`${cls} flex flex-col items-center justify-center shrink-0 leading-none`} style={{ background: bg, color: ink }} title={title ?? 'Nota de 0 a 10'} aria-label={empty ? 'sem nota' : `nota ${num(score)} de 10, ${bandLabel(score)}`}>
+      <span className={`${num_} font-bold tracking-tight`}>{empty ? '–' : num(score)}</span>
+      {size !== 'sm' && !empty && <span className="text-[10px] font-semibold uppercase tracking-wide mt-1 opacity-90">{bandLabel(score)}</span>}
     </div>
   );
 }
@@ -111,12 +115,42 @@ export function ErrorBox({ msg }: { msg: string }) {
 
 export function ScoreLegend() {
   return (
-    <div className="flex items-center gap-1 text-[11px] text-muted" aria-label="Escala de nota de 0 a 10">
-      <span>0</span>
-      {[0, 2, 4, 6, 8, 10].map((s) => (
-        <span key={s} className="w-4 h-2.5 rounded-sm" style={{ background: scoreColor(s) }} />
-      ))}
-      <span>10</span>
+    <div className="flex flex-wrap items-center gap-1" aria-label="Faixas de nota">
+      {BANDS.map((b, i) => {
+        const bg = scoreColor(b.min + 1);
+        const max = BANDS[i + 1]?.min ?? 10;
+        return (
+          <span key={b.label} className="text-[10px] font-semibold rounded px-1.5 py-0.5" style={{ background: bg, color: inkOn(bg) }}>
+            {b.label} {b.min}–{max}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Daylight bar for one day: the track spans the hours with light, the best window is drawn in
+ * its score colour with its times. Replaces the row of hourly squares.
+ */
+export function DayBar({ hourly, start, window, score }: { hourly: number[]; start: number; window?: { from: number; to: number }; score: number }) {
+  const day = hourly.slice(start, start + 24);
+  const lit = day.map((v, i) => (v >= 0 ? i : -1)).filter((i) => i >= 0);
+  if (!lit.length) return null;
+  const a = lit[0], b = lit[lit.length - 1] + 1;
+  const pct = (h: number) => `${((h - a) / (b - a)) * 100}%`;
+  const bg = scoreColor(score);
+  return (
+    <div aria-label={window ? `Melhor janela das ${window.from}h às ${window.to + 1}h` : 'Sem janela boa'}>
+      <div className="relative h-2.5 rounded-full" style={{ background: 'var(--hair)' }}>
+        {window && (
+          <div className="absolute top-0 bottom-0 rounded-full" style={{ left: pct(Math.max(a, window.from)), width: `calc(${pct(Math.min(b, window.to + 1))} - ${pct(Math.max(a, window.from))})`, background: bg, minWidth: 8 }} />
+        )}
+      </div>
+      <div className="relative h-3.5 text-[10px] text-muted mt-0.5">
+        <span className="absolute left-0">{String(a).padStart(2, '0')}h</span>
+        <span className="absolute right-0">{String(b).padStart(2, '0')}h</span>
+      </div>
     </div>
   );
 }

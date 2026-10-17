@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { NavLink, Route, Routes } from 'react-router-dom';
+import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { Loading } from './components/ui';
 import Home from './pages/Home';
 import { useForecast } from './lib/data';
@@ -41,7 +41,10 @@ function StatusBar() {
   );
 }
 
+export const COPYRIGHT = `© ${new Date().getFullYear()} Felipe Gutiérrez Carvalho`;
+
 export default function App() {
+  const { pathname } = useLocation();
   return (
     <div className="min-h-full flex flex-col max-w-3xl mx-auto">
       <StatusBar />
@@ -56,6 +59,7 @@ export default function App() {
             <Route path="/ajustes" element={<SettingsPage />} />
           </Routes>
         </Suspense>
+        {!pathname.startsWith('/mapa') && <footer className="text-center text-[11px] text-muted pt-8">{COPYRIGHT}</footer>}
       </main>
       <nav className="fixed bottom-0 inset-x-0 border-t border-hair bg-surface z-20" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="max-w-3xl mx-auto grid grid-cols-5">

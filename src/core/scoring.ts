@@ -200,7 +200,8 @@ export function dailyBest(scores: HourScore[], day: boolean[]): DayBest[] {
     const sub = idx.map((i) => scores[i]);
     const w = bestWindow(sub, idx.map((i) => day[i]));
     if (!w) return { date, score: 0, conf: 'baixa' as Confidence, red: false };
-    const top = sub[sub.findIndex((s) => s.score === w.score)];
+    // the peak hour inside the daylight window (a night hour can share the same score)
+    const top = sub.slice(w.start, w.end + 1).find((s) => s.score === w.score)!;
     const winScores = sub.slice(w.start, w.end + 1);
     return {
       date,

@@ -77,7 +77,7 @@ export default function Week() {
           </table>
         </div>
       )}
-      <div className="flex flex-wrap gap-2 justify-between items-center"><ScoreLegend /><span className="text-[11px] text-muted">? tracejado = confiança baixa · ⚠ = alerta de segurança</span></div>
+      <div className="space-y-1"><ScoreLegend /><p className="text-[11px] text-muted">Melhor nota de cada dia (horas de luz). ? com borda tracejada = confiança baixa · ⚠ = alerta de segurança.</p></div>
     </div>
   );
 }

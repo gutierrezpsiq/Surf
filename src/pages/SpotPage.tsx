@@ -52,7 +52,7 @@ export default function SpotPage() {
   const hours = idx.map((i) => d.hours[i]);
   const scores = idx.map((i) => scored.scores[i]);
   const win = bestWindow(scores, hours.map((h) => h.day));
-  const bestI = win ? scores.findIndex((s) => s.score === win.score) : 0;
+  const bestI = win ? scores.findIndex((s, i) => hours[i].day && s.score === win.score) : 0;
   const best = scores[bestI];
   // hour being explained: the one tapped on the chart, else the best of the day
   const hi = pickedHour != null && pickedHour < hours.length ? pickedHour : bestI;

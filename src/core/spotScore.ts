@@ -1,7 +1,7 @@
 /** Score a spot's hourly series end-to-end (shared by the pipeline and the app's re-scoring). */
 import { isUsable } from './assemble';
 import { tideStage } from './physics';
-import { dailyBest, DEFAULT_PREFS, Prefs, scoreHour, Skill } from './scoring';
+import { breaking, dailyBest, DEFAULT_PREFS, Prefs, scoreHour, Skill } from './scoring';
 import type { HourPoint, HourScore, OfficialWarning, Spot, SpotSummary } from './types';
 
 export const PROFILES: Record<Skill, Prefs> = {
@@ -19,14 +19,21 @@ export function scoreSeries(spot: Spot, hours: HourPoint[], nowIdx: number, pref
   });
 }
 
-export function summarise(id: string, hours: HourPoint[], scores: HourScore[], nowIdx: number): SpotSummary {
+export function summarise(spot: Spot, hours: HourPoint[], scores: HourScore[], nowIdx: number): SpotSummary {
   const day = hours.map((h) => h.day);
   // earlier hours today don't count as "best" anymore
   const future = scores.map((s, i) => (i < nowIdx ? { ...s, score: 0 } : s));
   const cur = scores[nowIdx];
+  const days = dailyBest(future, day).map((d) => {
+    const i = d.window ? hours.findIndex((h, k) => h.t.slice(0, 10) === d.date && scores[k].score === d.score && h.day) : -1;
+    if (i < 0 || !isUsable(hours[i])) return d;
+    const b = breaking(spot, hours[i]);
+    const r = (x: number, k = 1) => Math.round(x * 10 ** k) / 10 ** k;
+    return { ...d, facts: { h: r(b.h), t: Math.round(b.t), dir: Math.round(b.dir), wind: Math.round(hours[i].wind.v), rel: scores[i].windRel } };
+  });
   return {
-    id,
-    days: dailyBest(future, day),
+    id: spot.id,
+    days,
     hourly: scores.map((s, i) => (day[i] ? Math.round(s.score * 10) : -1)),
     now: cur && { score: cur.score, conf: cur.conf, reason: cur.reason, flags: cur.flags },
     sst: hours[nowIdx]?.sst,

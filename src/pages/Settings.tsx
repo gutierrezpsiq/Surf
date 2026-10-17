@@ -106,6 +106,7 @@ export default function SettingsPage() {
           <li>Modelos globais têm resolução de 9–28 km: não resolvem bancadas, refração fina nem ondas em baías abrigadas.</li>
           <li>Maré vem de modelo oceânico (~8 km), não da tábua oficial da Marinha.</li>
         </ul>
+        <p className="text-xs text-muted mt-3">© {new Date().getFullYear()} Felipe Gutiérrez Carvalho. Dados: Open-Meteo (CC BY 4.0), NOAA, IBGE, © colaboradores do OpenStreetMap, Natural Earth.</p>
       </Section>
     </div>
   );

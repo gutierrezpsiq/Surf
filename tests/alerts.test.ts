@@ -22,12 +22,13 @@ describe('spot summary + alerts', () => {
     return hour({ t, day: h >= 6 && h <= 18, windDir: cv(good ? 270 : 90), wind: cv(good ? 8 : 25) });
   });
   const scores = scoreSeries(spot, hours, 0, PROFILES['intermediário']);
-  const sum = summarise(spot.id, hours, scores, 0);
+  const sum = summarise(spot, hours, scores, 0);
 
   it('summarises per day with the best daylight window', () => {
     expect(sum.days).toHaveLength(2);
     expect(sum.days[1].window).toMatchObject({ start: '2026-10-18T06:00', end: '2026-10-18T10:00' });
     expect(sum.days[1].reason).toMatch(/terral/);
+    expect(sum.days[1].facts).toMatchObject({ t: 11, dir: 90, rel: 'terral' });
     expect(sum.hourly[0]).toBe(-1); // night
   });
 

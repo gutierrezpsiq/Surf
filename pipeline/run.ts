@@ -103,7 +103,7 @@ async function main() {
     const scores = scoreSeries(spot, hours, nowIdx, PROFILES['intermediário'], warnings);
     for (const skill of Object.keys(PROFILES) as Skill[]) {
       const sc = skill === 'intermediário' ? scores : scoreSeries(spot, hours, nowIdx, PROFILES[skill], warnings);
-      (summaries[skill] ??= []).push(summarise(spot.id, hours, sc, nowIdx));
+      (summaries[skill] ??= []).push(summarise(spot, hours, sc, nowIdx));
     }
     const daily = (k: string) => (wr.daily?.[k] ?? Object.entries(wr.daily ?? {}).find(([key]) => key.startsWith(k))?.[1] ?? []) as string[];
     const detail: SpotDetail = { id: spot.id, generatedAt, nowIdx, hours, scores, sunrise: daily('sunrise'), sunset: daily('sunset') };
